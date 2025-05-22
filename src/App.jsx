@@ -3,16 +3,16 @@ import React, { useEffect, useState, useRef } from "react";
 import { DeckGL } from "deck.gl";
 import { Map } from "react-map-gl/maplibre";
 import { ScatterplotLayer, PathLayer } from "@deck.gl/layers";
-import CompanyMarker from "./components/CompanyMarker";
 import ProductList from "./components/ProductList";
 
-// Usa un mapa gratuito de MapLibre
+// Mapa gratuito de MapLibre
 const MAP_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=MZjUAQpw10B8E0nsKVQP`;
 
+// 1) Centrar el mapa en La Habana / Almacenes San José
 const INITIAL_VIEW_STATE = {
-  latitude: 23.1136,
-  longitude: -82.3666,
-  zoom: 13,
+  latitude: 23.1298784,    // Almacenes San José, Habana Vieja
+  longitude: -82.3490351,
+  zoom: 15,                // Zoom alto para ver detalle
   bearing: 0,
   pitch: 0,
 };
@@ -25,17 +25,16 @@ function App() {
   const trailsRef = useRef({});
   const wsRef = useRef(null);
 
-  // Definimos la empresa (almacén)
+  // 2) Definir la empresa en Almacenes San José
   const company = {
-    id: "almacen_habana",
-    name: "Almacén La Habana",
-    lat: 23.1136,
-    lon: -82.3666,
+    id: "almacen_san_jose",
+    name: "Almacenes San José",
+    lat: 23.1298784,
+    lon: -82.3490351,
   };
 
-  // Simulación de productos pedidos
+  // Simulación de pedidos (igual que antes)…
   useEffect(() => {
-    // Aquí podrías reemplazar por fetch a tu servidor
     const demoOrders = [
       { id: 1, name: "Camisetas", quantity: 20, express: false },
       { id: 2, name: "Zapatos", quantity: 10, express: true },
@@ -44,74 +43,74 @@ function App() {
     setProducts(demoOrders);
   }, []);
 
+  // Conexión WebSocket (idéntica a la versión previa)…
   useEffect(() => {
-    // Conexión WebSocket (igual que antes)
     const connectWebSocket = () => {
-      try {
-        const ws = new WebSocket("ws://localhost:8765");
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          setConnectionStatus("Conectado");
-          setErrorMessage("");
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            const updated = {};
-            data.vehicles.forEach((v) => {
-              const prevTrail = trailsRef.current[v.id] || [];
-              const newTrail = [...prevTrail.slice(-20), [v.lon, v.lat]];
-              trailsRef.current[v.id] = newTrail;
-              updated[v.id] = {
-                id: v.id,
-                position: [v.lon, v.lat],
-                trail: newTrail,
-                color: getVehicleColor(v.id),
-              };
-            });
-            setVehicleData(updated);
-          } catch (err) {
-            setErrorMessage(`Error procesando datos: ${err.message}`);
-          }
-        };
-
-        ws.onclose = () => {
-          setConnectionStatus("Desconectado");
-          setTimeout(connectWebSocket, 3000);
-        };
-
-        ws.onerror = () => {
-          setConnectionStatus("Error");
-          setErrorMessage("Error en la conexión WebSocket");
-        };
-      } catch (err) {
-        setConnectionStatus("Error");
-        setErrorMessage(`Error de conexión: ${err.message}`);
+      const ws = new WebSocket("ws://localhost:8765");
+      wsRef.current = ws;
+      ws.onopen = () => {
+        setConnectionStatus("Conectado");
+        setErrorMessage("");
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          const updated = {};
+          data.vehicles.forEach((v) => {
+            const prev = trailsRef.current[v.id] || [];
+            const trail = [...prev.slice(-20), [v.lon, v.lat]];
+            trailsRef.current[v.id] = trail;
+            updated[v.id] = {
+              id: v.id,
+              position: [v.lon, v.lat],
+              trail,
+              color: getVehicleColor(v.id),
+            };
+          });
+          setVehicleData(updated);
+        } catch (err) {
+          setErrorMessage(`Error procesando datos: ${err.message}`);
+        }
+      };
+      ws.onclose = () => {
+        setConnectionStatus("Desconectado");
         setTimeout(connectWebSocket, 3000);
-      }
+      };
+      ws.onerror = () => {
+        setConnectionStatus("Error");
+        setErrorMessage("Error en la conexión WebSocket");
+      };
     };
     connectWebSocket();
     return () => wsRef.current?.close();
   }, []);
 
   const getVehicleColor = (id) => {
-    const idNum = parseInt(id.replace("veh_", ""), 10);
+    const n = parseInt(id.replace("veh_", ""), 10);
     const palette = [
       [255, 0, 0], [0, 255, 0], [0, 0, 255],
       [255, 255, 0], [255, 0, 255], [0, 255, 255],
       [255, 165, 0], [128, 0, 128], [0, 128, 0], [139, 69, 19],
     ];
-    return palette[idNum % palette.length];
+    return palette[n % palette.length];
   };
 
+  // Montar capas: empresa fija + vehículos + rutas
   const layers = [
+    new ScatterplotLayer({
+      id: "company-point",
+      data: [company],
+      getPosition: d => [d.lon, d.lat],
+      getFillColor: [255, 87, 34],
+      getRadius: 50,
+      radiusMinPixels: 10,
+      pickable: false,
+    }),
     new ScatterplotLayer({
       id: "vehicles",
       data: Object.values(vehicleData),
-      getPosition: (d) => d.position,
-      getFillColor: (d) => d.color,
+      getPosition: d => d.position,
+      getFillColor: d => d.color,
       getRadius: 50,
       radiusMinPixels: 5,
       radiusMaxPixels: 15,
@@ -119,26 +118,20 @@ function App() {
     new PathLayer({
       id: "trails",
       data: Object.values(vehicleData),
-      getPath: (d) => d.trail,
+      getPath: d => d.trail,
+      getColor: d => d.color,
       getWidth: 3,
-      getColor: (d) => d.color,
       widthMinPixels: 2,
       widthMaxPixels: 5,
     }),
   ];
 
-  // Estilos para el panel de control
   const overlayStyle = {
     position: "absolute",
-    top: 10,
-    left: 10,
-    zIndex: 100,
-    padding: 12,
-    backgroundColor: "rgba(255,255,255,0.8)",
-    borderRadius: 4,
-    maxWidth: 280,
-    fontFamily: "Arial, sans-serif",
-    fontSize: "0.9rem"
+    top: 10, left: 10, zIndex: 100,
+    padding: 12, backgroundColor: "rgba(255,255,255,0.8)",
+    borderRadius: 4, maxWidth: 280,
+    fontFamily: "Arial, sans-serif", fontSize: "0.9rem"
   };
 
   return (
@@ -156,9 +149,7 @@ function App() {
         controller={true}
         layers={layers}
       >
-        <Map reuseMaps mapLib={import("maplibre-gl")} mapStyle={MAP_STYLE}>
-          <CompanyMarker company={company} />
-        </Map>
+        <Map reuseMaps mapLib={import("maplibre-gl")} mapStyle={MAP_STYLE} />
       </DeckGL>
     </>
   );
