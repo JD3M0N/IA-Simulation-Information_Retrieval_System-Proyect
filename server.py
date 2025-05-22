@@ -33,7 +33,7 @@ def load_streets():
     global street_graph, all_nodes
     
     # Cargar datos de OSM desde el archivo de caché
-    cache_file = os.path.join("cache", "f9101730ccf988c9fb4913cd3fe67d6392e842f4.json")
+    cache_file = os.path.join("cache", "479c34c9f9679cb8467293e0403a0250c7ef8556.json")
     
     try:
         print(f"Intentando abrir archivo de caché: {cache_file}")
