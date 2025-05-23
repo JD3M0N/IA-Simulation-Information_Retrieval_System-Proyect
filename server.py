@@ -16,7 +16,7 @@ traffic_lights = {}  # node_id: {"state": "red"/"green", "timer": X}
 lat_base, lon_base = 23.1136, -82.3666
 
 # Grafo de calles y rutas
-street_graph = nx.Graph()
+street_graph = nx.MultiDiGraph()
 all_nodes = []
 vehicle_speeds = {}  # Velocidades diferentes para cada vehículo
 vehicles = {}
@@ -51,7 +51,7 @@ def load_streets():
                 lat = element.get('lat')
                 lon = element.get('lon')
                 if node_id and lat and lon:
-                    nodes[node_id] = (float(lat), float(lon))  # Asegurarse de que sean float
+                    nodes[node_id] = (float(lat), float(lon)) 
                     street_graph.add_node(node_id, lat=float(lat), lon=float(lon))
         
         print(f"Nodos extraídos: {len(nodes)}")
@@ -61,6 +61,10 @@ def load_streets():
         for element in osm_data.get('elements', []):
             if element.get('type') == 'way' and element.get('tags', {}).get('highway'):
                 way_nodes = element.get('nodes', [])
+                
+                # Verificar si es de un solo sentido
+                oneway = element.get('tags', {}).get('oneway', 'no')
+                
                 for i in range(len(way_nodes) - 1):
                     if way_nodes[i] in nodes and way_nodes[i+1] in nodes:
                         node1 = way_nodes[i]
@@ -69,8 +73,17 @@ def load_streets():
                         lat2, lon2 = nodes[node2]
                         # Calcular distancia entre nodos
                         distance = haversine(lat1, lon1, lat2, lon2)
-                        street_graph.add_edge(node1, node2, weight=distance)
-                        edge_count += 1
+                        
+                        # Añadir arista(s) según dirección
+                        if oneway == 'yes':
+                            # Solo añadir en la dirección especificada
+                            street_graph.add_edge(node1, node2, weight=distance)
+                            edge_count += 1
+                        else:
+                            # Añadir en ambas direcciones si es bidireccional
+                            street_graph.add_edge(node1, node2, weight=distance)
+                            street_graph.add_edge(node2, node1, weight=distance)
+                            edge_count += 2
         
         # Lista de todos los nodos del grafo
         all_nodes = list(street_graph.nodes())

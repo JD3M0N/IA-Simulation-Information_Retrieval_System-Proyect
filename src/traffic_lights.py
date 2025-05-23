@@ -12,8 +12,8 @@ ZONE_WIDTH = 0.01  # Longitud aproximada para dividir zonas
 
 def initialize_traffic_lights(street_graph, traffic_lights):
 
-    candidates = [n for n in street_graph.nodes() if len(list(street_graph.neighbors(n))) >= 3]
-    selected = random.sample(candidates, min(1000, len(candidates)))
+    candidates = [n for n in street_graph.nodes() if len(list(street_graph.neighbors(n))) >= 4]
+    selected = random.sample(candidates, min(1500, len(candidates)))
 
     zone_groups = {i: [] for i in range(NUM_ZONES)}
 
