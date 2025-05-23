@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from "react";
 import { DeckGL } from "deck.gl";
 import { Map } from "react-map-gl/maplibre";
-import { ScatterplotLayer, PathLayer } from "@deck.gl/layers";
+import { IconLayer, ScatterplotLayer} from "@deck.gl/layers";
+
 
 // Usa un mapa gratuito de MapLibre en lugar de requerir API key
 const MAP_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=MZjUAQpw10B8E0nsKVQP`;
@@ -16,6 +17,7 @@ const INITIAL_VIEW_STATE = {
 
 function App() {
   const [vehicleData, setVehicleData] = useState({});
+  const [trafficLights, setTrafficLights] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState("Conectando...");
   const [errorMessage, setErrorMessage] = useState("");
   const trailsRef = useRef({});
@@ -50,11 +52,13 @@ function App() {
                 id: v.id,
                 position: [v.lon, v.lat],
                 trail: newTrail,
-                color: getVehicleColor(v.id), // Color único por vehículo
+                color: 0,
               };
             });
 
             setVehicleData(updated);
+            setTrafficLights(data.traffic_lights || []);
+
           } catch (err) {
             console.error("Error procesando mensaje:", err);
             setErrorMessage(`Error procesando datos: ${err.message}`);
@@ -91,44 +95,35 @@ function App() {
     };
   }, []);
 
-  // Genera un color único para cada vehículo basado en su ID
-  const getVehicleColor = (id) => {
-    const idNum = parseInt(id.replace("veh_", ""));
-    const colors = [
-      [255, 0, 0], // Rojo
-      [0, 255, 0], // Verde
-      [0, 0, 255], // Azul
-      [255, 255, 0], // Amarillo
-      [255, 0, 255], // Magenta
-      [0, 255, 255], // Cian
-      [255, 165, 0], // Naranja
-      [128, 0, 128], // Púrpura
-      [0, 128, 0], // Verde oscuro
-      [139, 69, 19], // Marrón
-    ];
-    return colors[idNum % colors.length];
-  };
 
   const layers = [
-    new ScatterplotLayer({
-      id: "vehicles",
+    new IconLayer({
+      id: "vehicle-icons",
       data: Object.values(vehicleData),
+      getIcon: (d) => ({
+        url: "/icons/car.png",
+        width: 128,
+        height: 128,
+        anchorY: 128,
+      }),
       getPosition: (d) => d.position,
-      getFillColor: (d) => d.color || [0, 200, 255],
-      getRadius: 50,
-      radiusMinPixels: 5,
-      radiusMaxPixels: 15,
+      getSize: 2, // escala del ícono
+      sizeScale: 10,
+      getAngle: 0,
+      getColor: 0,
+      pickable: true,
     }),
 
-    new PathLayer({
-      id: "trails",
-      data: Object.values(vehicleData),
-      getPath: (d) => d.trail,
-      getWidth: 3,
-      getColor: (d) => d.color || [255, 100, 0],
-      widthMinPixels: 2,
-      widthMaxPixels: 5,
+    new ScatterplotLayer({
+      id: "traffic-lights",
+      data: trafficLights,
+      getPosition: (d) => [d.lon, d.lat],
+      getFillColor: (d) => d.state === "red" ? [255, 0, 0] : [0, 255, 0],
+      getRadius: 10,
+      radiusMinPixels: 2,
     }),
+
+
   ];
 
   return (
