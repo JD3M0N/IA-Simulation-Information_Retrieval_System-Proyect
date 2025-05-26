@@ -6,7 +6,6 @@ NUM_VEHICLES = 10000
 def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles):
     """Inicializa la posición de los vehículos y les asigna rutas aleatorias"""
     
-    
     if not all_nodes:
         print("No hay nodos en el grafo. Inicialización fallida.")
         return
@@ -38,23 +37,22 @@ def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles):
         }
         
         # Asignar velocidad según tipo de vehículo
-        base_speed = 0.005
+        # Estos valores ahora serán factores que se multiplicarán por la velocidad máxima de la calle
         if vehicle_type == "rápido":
-            speed_factor = random.uniform(1.3, 1.8)
+            speed_factor = random.uniform(0.9, 1.0)  # Cerca del límite
         elif vehicle_type == "agresivo":
-            speed_factor = random.uniform(1.2, 1.5)
+            speed_factor = random.uniform(0.85, 1.05)  # Puede exceder ligeramente
         elif vehicle_type == "lento":
-            speed_factor = random.uniform(0.5, 0.8)
+            speed_factor = random.uniform(0.5, 0.7)  # Significativamente por debajo
         elif vehicle_type == "cauteloso":
-            speed_factor = random.uniform(0.7, 0.9)
+            speed_factor = random.uniform(0.7, 0.85)  # Moderadamente por debajo
         else:  # normal
-            speed_factor = random.uniform(0.9, 1.1)
+            speed_factor = random.uniform(0.75, 0.9)  # Ligeramente por debajo
         
-        # Asignar velocidad aleatoria (km por actualización)
-        # Incrementada para que se mueva más rápido y sea visible
-        vehicle_speeds[vid] = base_speed * speed_factor
+        # Guardar el factor de velocidad base (se ajustará con límites reales en cada calle)
+        vehicle_speeds[vid] = speed_factor * 0.005  # Base de velocidad
         
-        # Asignar una ruta aleatoría
+        # Asignar una ruta aleatoria
         assign_random_route(vid, street_graph, all_nodes, vehicles)
     
     print(f"Vehículos inicializados: {len(vehicles)}")
@@ -143,6 +141,33 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
             
         # Obtener las coordenadas de los nodos
         try:
+            # Obtener límites de velocidad de la calle actual
+            edge_data = street_graph.get_edge_data(current_node, next_node, 0)
+            max_speed = edge_data.get('max_speed', 50)  # km/h
+            min_speed = edge_data.get('min_speed', 30)  # km/h
+            
+            # Convertir km/h a unidades de progreso por actualización
+            # Suponiendo que 50 km/h = 0.005 unidades de progreso por actualización
+            max_speed_progress = max_speed * 0.0001  # Ajusta este factor según necesites
+            min_speed_progress = min_speed * 0.0001  # Ajusta este factor según necesites
+            
+            # Ajustar la velocidad del vehículo para que esté dentro del rango de la calle
+            base_vehicle_speed = vehicle_speeds[vid]
+            
+            # Aplicar el tipo de conductor (respetando límites)
+            if v["type"] == "agresivo":
+                # Los agresivos pueden exceder ligeramente el límite
+                adjusted_speed = min(base_vehicle_speed, max_speed_progress * 1.1)
+            elif v["type"] == "cauteloso":
+                # Los cautelosos nunca exceden el límite y prefieren ir más lento
+                adjusted_speed = min(base_vehicle_speed, max_speed_progress * 0.8)
+            else:
+                # Otros respetan el límite máximo
+                adjusted_speed = min(base_vehicle_speed, max_speed_progress)
+            
+            # Nunca ir por debajo del mínimo (excepto en situaciones de tráfico)
+            adjusted_speed = max(adjusted_speed, min_speed_progress)
+            
             # Comportamiento ante semáforos
             if next_node in traffic_lights:
                 light_state = traffic_lights[next_node]["state"]
@@ -150,21 +175,20 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
                 # Si el semáforo está en rojo y estamos cerca, desacelerar
                 if light_state == "red" and v["progress"] > 0.7 and v["progress"] < 0.9:
                     # Reducir velocidad drásticamente cuando está cerca
-                    v["progress"] += vehicle_speeds[vid] * 0.1
+                    v["progress"] += adjusted_speed * 0.1
                     continue
                 elif light_state == "red" and v["progress"] > 0.95:
                     # Reducir velocidad moderadamente con semáforo amarillo
-                    v["progress"] += vehicle_speeds[vid] * 0
+                    v["progress"] += 0
                     continue
-            
             
             current_lat = float(street_graph.nodes[current_node]['lat'])
             current_lon = float(street_graph.nodes[current_node]['lon'])
             next_lat = float(street_graph.nodes[next_node]['lat'])
             next_lon = float(street_graph.nodes[next_node]['lon'])
             
-            # Actualizar el progreso basado en la velocidad
-            v["progress"] += vehicle_speeds[vid] 
+            # Actualizar el progreso basado en la velocidad ajustada
+            v["progress"] += adjusted_speed 
             
             if v["progress"] >= 1.0:
                 # Llegó al nodo siguiente
