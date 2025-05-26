@@ -70,3 +70,49 @@ def aco_vrp(G, depot, objectives, num_vehicles, capacities, demands, iterations=
             best_cost = best_in_iteration[1]
 
     return best_solution
+
+def optimize_delivery_routes(street_graph, start_point, target_points, num_trucks, 
+                             truck_capacities=None, target_demands=None, 
+                             optimization_iterations=100):
+    """
+    Optimiza las rutas de entrega para una flota de camiones.
+    
+    Args:
+        street_graph: Grafo de calles de NetworkX
+        start_point: ID del nodo de salida
+        target_points: Lista de IDs de nodos objetivo
+        num_trucks: Número de camiones disponibles
+        truck_capacities: Lista de capacidades de cada camión (si es None, se asume capacidad infinita)
+        target_demands: Diccionario con la demanda de cada punto objetivo (si es None, se asume demanda de 1)
+        optimization_iterations: Número de iteraciones para el algoritmo ACO
+        
+    Returns:
+        Una tupla con (rutas_optimizadas, costo_total) donde rutas_optimizadas es una lista de listas,
+        cada una representando la ruta de un camión.
+    """
+    # Configurar valores por defecto si no se proporcionan
+    if truck_capacities is None:
+        truck_capacities = [float('inf')] * num_trucks
+    
+    if target_demands is None:
+        target_demands = {point: 1 for point in target_points}
+    
+    # Ejecutar el algoritmo ACO
+    solution = aco_vrp(
+        G=street_graph,
+        depot=start_point,
+        objectives=target_points,
+        num_vehicles=num_trucks,
+        capacities=truck_capacities,
+        demands=target_demands,
+        iterations=optimization_iterations,
+        alpha=1.0,  # Importancia de las feromonas
+        beta=2.0,   # Importancia de la distancia
+        evaporation=0.5  # Tasa de evaporación de feromonas
+    )
+    
+    if solution:
+        routes, total_cost = solution
+        return routes, total_cost
+    else:
+        return None, float('inf')

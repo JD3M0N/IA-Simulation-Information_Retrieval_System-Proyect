@@ -8,6 +8,7 @@ from datetime import datetime
 import math
 from src.vehicle import initialize_vehicles, update_vehicle_positions
 from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
+from src.route_optimizer import optimize_delivery_routes
 
 
 traffic_lights = {}  # node_id: {"state": "red"/"green", "timer": X}
@@ -195,8 +196,105 @@ async def send_positions(websocket):
             await asyncio.sleep(1)
 
 async def handler(websocket):
+    """Manejador principal de conexiones WebSocket"""
     print("Cliente conectado")
-    await send_positions(websocket)
+    try:
+        # Iniciar una tarea para enviar actualizaciones de posición
+        position_task = asyncio.create_task(send_positions(websocket))
+        
+        # Recibir y procesar mensajes del cliente
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                message_type = data.get('type', '')
+                
+                if message_type == 'optimization_request':
+                    # Manejar solicitud de optimización
+                    await handle_optimization_request(websocket, data)
+                # Aquí puedes manejar otros tipos de mensajes si es necesario
+                
+            except json.JSONDecodeError:
+                print("Error: Mensaje recibido no es JSON válido")
+            except Exception as e:
+                print(f"Error procesando mensaje: {e}")
+        
+        # Cancelar la tarea de envío de posiciones cuando el cliente se desconecta
+        position_task.cancel()
+        
+    except websockets.exceptions.ConnectionClosed:
+        print("Cliente desconectado")
+    except Exception as e:
+        print(f"Error en el handler: {e}")
+
+# Maneja solicitudes de optimización de rutas
+async def handle_optimization_request(websocket, data):
+    """Maneja solicitudes de optimización de rutas"""
+    try:
+        start_point = data.get('start_point')
+        target_points = data.get('target_points', [])
+        num_trucks = data.get('num_trucks', 1)
+        truck_capacities = data.get('truck_capacities')
+        target_demands = data.get('target_demands')
+        
+        # Validar datos de entrada
+        if not start_point or not target_points:
+            await websocket.send(json.dumps({
+                "type": "optimization_error",
+                "message": "Se requiere un punto de inicio y al menos un objetivo"
+            }))
+            return
+            
+        # Convertir IDs de nodos a enteros si es necesario
+        try:
+            start_point = int(start_point)
+            target_points = [int(p) for p in target_points]
+        except ValueError:
+            # Si los IDs no son numéricos, mantenerlos como están
+            pass
+            
+        # Realizar la optimización
+        routes, total_cost = optimize_delivery_routes(
+            street_graph=street_graph,
+            start_point=start_point,
+            target_points=target_points,
+            num_trucks=num_trucks,
+            truck_capacities=truck_capacities,
+            target_demands=target_demands
+        )
+        
+        # Preparar resultados para enviar al cliente
+        if routes:
+            # Convertir las rutas a formato amigable para el cliente
+            formatted_routes = []
+            for route in routes:
+                route_points = []
+                for node_id in route:
+                    node_data = street_graph.nodes[node_id]
+                    route_points.append({
+                        "node_id": node_id,
+                        "lat": node_data.get('lat'),
+                        "lon": node_data.get('lon')
+                    })
+                formatted_routes.append(route_points)
+                
+            # Enviar resultados
+            await websocket.send(json.dumps({
+                "type": "optimization_result",
+                "routes": formatted_routes,
+                "total_cost": total_cost
+            }))
+        else:
+            await websocket.send(json.dumps({
+                "type": "optimization_error",
+                "message": "No se pudo encontrar una solución"
+            }))
+            
+    except Exception as e:
+        print(f"Error en optimización: {e}")
+        await websocket.send(json.dumps({
+            "type": "optimization_error",
+            "message": f"Error en el proceso de optimización: {str(e)}"
+        }))
 
 async def main():
     # Cargar calles, inicializar vehículos y semaforos
