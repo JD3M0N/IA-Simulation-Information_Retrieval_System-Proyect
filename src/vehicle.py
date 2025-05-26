@@ -1,9 +1,14 @@
 import random
+import math  # Añadir importación de math para la función exponencial
+
+# Parámetros de congestión
+CONGESTION_ALPHA = 0.5  # Controla la pendiente de la curva logística
+CONGESTION_THRESHOLD = 5  # Umbral a partir del cual la congestión se vuelve significativa
 
 # Número de vehículos a simular (reducido para depuración)
 NUM_VEHICLES = 10000
 
-def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles):
+def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles, street_congestion):
     """Inicializa la posición de los vehículos y les asigna rutas aleatorias"""
     
     if not all_nodes:
@@ -53,11 +58,11 @@ def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles):
         vehicle_speeds[vid] = speed_factor * 0.005  # Base de velocidad
         
         # Asignar una ruta aleatoria
-        assign_random_route(vid, street_graph, all_nodes, vehicles)
+        assign_random_route(vid, street_graph, all_nodes, vehicles, street_congestion)
     
     print(f"Vehículos inicializados: {len(vehicles)}")
 
-def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles):
+def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion):
     """Asigna una ruta aleatoria a un vehículo"""
     
     if not all_nodes or len(all_nodes) < 2:
@@ -65,6 +70,7 @@ def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles):
         return
     
     try:
+        
         current = vehicles[vehicle_id]["current_node"]
         
         # Encontrar nodos conectados
@@ -84,14 +90,21 @@ def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles):
             vehicles[vehicle_id]["current_node"] = new_node
             vehicles[vehicle_id]["lat"] = float(node_data['lat'])
             vehicles[vehicle_id]["lon"] = float(node_data['lon'])
-            assign_random_route(vehicle_id, street_graph, all_nodes, vehicles)
+            assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion)
+    
+        # Incrementar congestión en la nueva calle
+        if vehicles[vehicle_id]["next_node"] is not None:
+            edge = (vehicles[vehicle_id]["current_node"], vehicles[vehicle_id]["next_node"])
+            if edge in street_congestion:
+                street_congestion[edge] += 1
     
     except Exception as e:
         print(f"Error asignando ruta para {vehicle_id}: {e}")
 
-def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles):
+def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles,  street_congestion):
     """Asigna una ruta que mantiene la dirección de movimiento actual"""
     try:
+        
         current = vehicles[vehicle_id]["current_node"]
         previous = vehicles[vehicle_id].get("previous_node")
         
@@ -100,7 +113,7 @@ def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles):
         
         if not neighbors:
             # Si no hay vecinos, asignar un nodo aleatorio
-            assign_random_route(vehicle_id, street_graph, all_nodes, vehicles)
+            assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion)
             return
             
         if previous and len(neighbors) > 1:
@@ -121,22 +134,31 @@ def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles):
         vehicles[vehicle_id]["next_node"] = destination
         vehicles[vehicle_id]["progress"] = 0.0
         
+        # Incrementar congestión en la nueva calle
+        if vehicles[vehicle_id]["next_node"] is not None:
+            edge = (vehicles[vehicle_id]["current_node"], vehicles[vehicle_id]["next_node"])
+            if edge in street_congestion:
+                street_congestion[edge] += 1
+        
     except Exception as e:
         print(f"Error planificando ruta continua para {vehicle_id}: {e}")
         # Fallback a ruta aleatoria
-        assign_random_route(vehicle_id, street_graph, all_nodes, vehicles)
+        assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion)
         
 
 
-def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes):
-    """Actualiza las posiciones de los vehículos en sus rutas"""
+def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes, street_congestion):
+    """Actualiza las posiciones de los vehículos en sus rutas y gestiona la congestión del tráfico"""
     for vid, v in vehicles.items():
         current_node = v["current_node"]
         next_node = v["next_node"]
+        
+        # Guardar la calle actual para actualizar la congestión
+        current_edge = (current_node, next_node) if next_node is not None else None
 
         # Si no tiene un nodo siguiente, asignar uno
         if next_node is None:
-            assign_random_route(vid, street_graph, all_nodes, vehicles)
+            assign_random_route(vid, street_graph, all_nodes, vehicles, street_congestion)
             continue
             
         # Obtener las coordenadas de los nodos
@@ -147,7 +169,6 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
             min_speed = edge_data.get('min_speed', 30)  # km/h
             
             # Convertir km/h a unidades de progreso por actualización
-            # Suponiendo que 50 km/h = 0.005 unidades de progreso por actualización
             max_speed_progress = max_speed * 0.0001  # Ajusta este factor según necesites
             min_speed_progress = min_speed * 0.0001  # Ajusta este factor según necesites
             
@@ -168,17 +189,31 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
             # Nunca ir por debajo del mínimo (excepto en situaciones de tráfico)
             adjusted_speed = max(adjusted_speed, min_speed_progress)
             
+            # Ajustar velocidad basada en la congestión de la calle actual
+            current_congestion = street_congestion.get((current_node, next_node), 0)
+            
+            # Modelo de congestión con función logística
+            # La función devuelve valores entre 0 y 1, donde:
+            # - Valores cercanos a 1 significan poco impacto (pocos vehículos)
+            # - Valores cercanos a 0 significan mucho impacto (muchos vehículos)
+            congestion_factor = 1 / (1 + math.exp(CONGESTION_ALPHA * (current_congestion - CONGESTION_THRESHOLD)))
+            
+            # Limitar la reducción máxima al 20% de la velocidad original
+            congestion_factor = max(0.2, congestion_factor)
+            
+            adjusted_speed = adjusted_speed * congestion_factor
+            
             # Comportamiento ante semáforos
             if next_node in traffic_lights:
                 light_state = traffic_lights[next_node]["state"]
                 
                 # Si el semáforo está en rojo y estamos cerca, desacelerar
-                if light_state == "red" and v["progress"] > 0.7 and v["progress"] < 0.9:
+                if light_state == "red" and v["progress"] > 0.7 and v["progress"] <= 0.97:
                     # Reducir velocidad drásticamente cuando está cerca
                     v["progress"] += adjusted_speed * 0.1
                     continue
-                elif light_state == "red" and v["progress"] > 0.95:
-                    # Reducir velocidad moderadamente con semáforo amarillo
+                elif light_state == "red" and v["progress"] > 0.98:
+                    
                     v["progress"] += 0
                     continue
             
@@ -191,6 +226,10 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
             v["progress"] += adjusted_speed 
             
             if v["progress"] >= 1.0:
+                # Decrementar la congestión en la calle que acaba de dejar
+                if current_edge in street_congestion:
+                    street_congestion[current_edge] = max(0, street_congestion[current_edge] - 1)
+                
                 # Llegó al nodo siguiente
                 v["current_node"] = next_node
                 v["next_node"] = None
@@ -199,11 +238,16 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
                 
                 # Decidir si continuar en la misma dirección o cambiar
                 if random.random() < 0.7:  # 70% de probabilidad de mantener dirección
-                    plan_continuous_route(vid, street_graph, all_nodes, vehicles)
+                    plan_continuous_route(vid, street_graph, all_nodes, vehicles, street_congestion)
                 else:
                     # Asignar una nueva ruta aleatoria
-                    assign_random_route(vid, street_graph, all_nodes, vehicles)
-                    
+                    assign_random_route(vid, street_graph, all_nodes, vehicles, street_congestion)
+                
+                # Incrementar la congestión en la nueva calle
+                new_edge = (v["current_node"], v["next_node"])
+                if v["next_node"] is not None and new_edge in street_congestion:
+                    street_congestion[new_edge] += 1
+                
             else:
                 # Interpolación lineal entre los nodos con pequeña variación
                 variation = random.uniform(-0.000000005, 0.000000005)  # Pequeña variación para evitar solapamiento
@@ -213,4 +257,4 @@ def update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_spe
         except Exception as e:
             # En caso de error, asignar una nueva ruta
             print(f"Error en actualización de {vid}: {e}")
-            assign_random_route(vid, street_graph, all_nodes, vehicles)
+            assign_random_route(vid, street_graph, all_nodes, vehicles, street_congestion)

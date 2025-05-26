@@ -20,6 +20,7 @@ street_graph = nx.MultiDiGraph()
 all_nodes = []
 vehicle_speeds = {}  # Velocidades diferentes para cada vehículo
 vehicles = {}
+street_congestion = {}  # (node1, node2): cantidad_vehiculos
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -33,7 +34,7 @@ def haversine(lat1, lon1, lat2, lon2):
 
 def load_streets():
     """Carga los datos del mapa desde los archivos de caché y construye el grafo de calles"""
-    global street_graph, all_nodes
+    global street_graph, all_nodes, street_congestion
     
     # Cargar datos de OSM desde el archivo de caché
     cache_file = os.path.join("cache", "479c34c9f9679cb8467293e0403a0250c7ef8556.json")
@@ -131,6 +132,11 @@ def load_streets():
         
         # Lista de todos los nodos del grafo
         all_nodes = list(street_graph.nodes())
+        
+        # Inicializar congestión a 0 para todas las calles
+        for edge in street_graph.edges():
+            street_congestion[edge] = 0
+        
         print(f"Grafo cargado con {len(all_nodes)} nodos y {edge_count} aristas")
         
     except Exception as e:
@@ -157,7 +163,7 @@ async def send_positions(websocket):
     while True:
         try:
             # Actualizar las posiciones
-            update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes)
+            update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes, street_congestion)
             update_traffic_lights(traffic_lights)
             
             # Empaquetar y enviar los datos
@@ -195,7 +201,7 @@ async def handler(websocket):
 async def main():
     # Cargar calles, inicializar vehículos y semaforos
     load_streets()
-    initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles)
+    initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles, street_congestion)
     initialize_traffic_lights(street_graph, traffic_lights)
 
 
