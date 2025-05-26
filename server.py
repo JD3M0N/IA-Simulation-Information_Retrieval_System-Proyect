@@ -38,6 +38,24 @@ def load_streets():
     # Cargar datos de OSM desde el archivo de caché
     cache_file = os.path.join("cache", "479c34c9f9679cb8467293e0403a0250c7ef8556.json")
     
+    # Velocidades estimadas basadas en tipo de calle (km/h)
+    highway_speeds = {
+        "motorway": 120,
+        "trunk": 100,
+        "primary": 90,
+        "secondary": 70,
+        "tertiary": 50,
+        "residential": 30,
+        "service": 20,
+        "unclassified": 40,
+        "living_street": 15,
+        "pedestrian": 5,
+        "track": 20,
+        "path": 10,
+        # Valores por defecto para otros tipos
+        "default": 50
+    }
+    
     try:
         print(f"Intentando abrir archivo de caché: {cache_file}")
         with open(cache_file, 'r', encoding='utf-8') as f:
@@ -65,6 +83,26 @@ def load_streets():
                 # Verificar si es de un solo sentido
                 oneway = element.get('tags', {}).get('oneway', 'no')
                 
+                # Obtener información de velocidad
+                highway_type = element.get('tags', {}).get('highway', 'default')
+                max_speed_raw = element.get('tags', {}).get('maxspeed')
+                
+                # Procesar maxspeed si existe
+                max_speed = None
+                if max_speed_raw:
+                    try:
+                        # Manejar formatos como "50" o "50 km/h"
+                        max_speed = float(max_speed_raw.split()[0])
+                    except (ValueError, IndexError):
+                        max_speed = None
+                
+                # Usar velocidad estimada si no hay maxspeed
+                if max_speed is None:
+                    max_speed = highway_speeds.get(highway_type, highway_speeds["default"])
+                
+                # Calcular velocidad mínima (70% de la máxima como regla general)
+                min_speed = max_speed * 0.7
+                
                 for i in range(len(way_nodes) - 1):
                     if way_nodes[i] in nodes and way_nodes[i+1] in nodes:
                         node1 = way_nodes[i]
@@ -74,15 +112,21 @@ def load_streets():
                         # Calcular distancia entre nodos
                         distance = haversine(lat1, lon1, lat2, lon2)
                         
-                        # Añadir arista(s) según dirección
+                        # Añadir arista(s) según dirección con información de velocidad
                         if oneway == 'yes':
                             # Solo añadir en la dirección especificada
-                            street_graph.add_edge(node1, node2, weight=distance)
+                            street_graph.add_edge(node1, node2, weight=distance, 
+                                                 max_speed=max_speed, min_speed=min_speed,
+                                                 highway_type=highway_type)
                             edge_count += 1
                         else:
                             # Añadir en ambas direcciones si es bidireccional
-                            street_graph.add_edge(node1, node2, weight=distance)
-                            street_graph.add_edge(node2, node1, weight=distance)
+                            street_graph.add_edge(node1, node2, weight=distance, 
+                                                 max_speed=max_speed, min_speed=min_speed,
+                                                 highway_type=highway_type)
+                            street_graph.add_edge(node2, node1, weight=distance, 
+                                                 max_speed=max_speed, min_speed=min_speed,
+                                                 highway_type=highway_type)
                             edge_count += 2
         
         # Lista de todos los nodos del grafo
@@ -98,7 +142,11 @@ def load_streets():
             lon = lon_base + random.uniform(-0.01, 0.01)
             street_graph.add_node(i, lat=lat, lon=lon)
             if i > 0:
-                street_graph.add_edge(i-1, i)
+                # Agregar también velocidades en el grafo de desarrollo
+                max_speed = random.choice([30, 50, 70, 90])
+                min_speed = max_speed * 0.7
+                street_graph.add_edge(i-1, i, weight=0.01, max_speed=max_speed, min_speed=min_speed, 
+                                     highway_type="residential")
         all_nodes = list(street_graph.nodes())
         print("Usando grafo de desarrollo con 20 nodos")
 
