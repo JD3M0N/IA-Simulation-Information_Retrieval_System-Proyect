@@ -8,7 +8,7 @@ from datetime import datetime
 import math
 from src.vehicle import initialize_vehicles, update_vehicle_positions
 from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
-from src.route_optimizer import optimize_delivery_routes
+from src.optimized_route import optimize_delivery_routes
 
 
 traffic_lights = {}  # node_id: {"state": "red"/"green", "timer": X}
@@ -264,25 +264,46 @@ async def handle_optimization_request(websocket, data):
         
         # Preparar resultados para enviar al cliente
         if routes:
-            # Convertir las rutas a formato amigable para el cliente
-            formatted_routes = []
-            for route in routes:
-                route_points = []
-                for node_id in route:
-                    node_data = street_graph.nodes[node_id]
-                    route_points.append({
-                        "node_id": node_id,
-                        "lat": node_data.get('lat'),
-                        "lon": node_data.get('lon')
-                    })
-                formatted_routes.append(route_points)
-                
-            # Enviar resultados
-            await websocket.send(json.dumps({
-                "type": "optimization_result",
-                "routes": formatted_routes,
-                "total_cost": total_cost
-            }))
+            try:
+                # Verificar que routes sea iterable
+                if not hasattr(routes, '__iter__'):
+                    raise TypeError(f"Las rutas deben ser iterables, se recibió: {type(routes)}")
+                    
+                # Convertir las rutas a formato amigable para el cliente
+                formatted_routes = []
+                for route in routes:
+                    # Verificar que cada ruta sea iterable
+                    if not hasattr(route, '__iter__'):
+                        print(f"Advertencia: Se encontró una ruta que no es iterable: {type(route)}. Saltando.")
+                        continue
+                        
+                    route_points = []
+                    for node_id in route:
+                        try:
+                            node_data = street_graph.nodes[node_id]
+                            route_points.append({
+                                "node_id": node_id,
+                                "lat": node_data.get('lat'),
+                                "lon": node_data.get('lon')
+                            })
+                        except (KeyError, TypeError) as e:
+                            print(f"Error al procesar el nodo {node_id}: {e}")
+                            continue
+                            
+                    formatted_routes.append(route_points)
+                    
+                # Enviar resultados
+                await websocket.send(json.dumps({
+                    "type": "optimization_result",
+                    "routes": formatted_routes,
+                    "total_cost": total_cost
+                }))
+            except Exception as e:
+                print(f"Error al formatear rutas: {e}")
+                await websocket.send(json.dumps({
+                    "type": "optimization_error",
+                    "message": f"Error al procesar las rutas optimizadas: {str(e)}"
+                }))
         else:
             await websocket.send(json.dumps({
                 "type": "optimization_error",
@@ -314,6 +335,8 @@ async def main():
         # Mantener el servidor ejecutándose indefinidamente
         await asyncio.Future()
 
+
+    
 # Ejecuta el punto de entrada principal
 if __name__ == "__main__":
     try:
