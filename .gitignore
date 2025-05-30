@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+#Tester del Crawler
+src/test_weather_crawler.py
+
 # Entorno virtual
 ia_sim_sri/
 
