@@ -308,7 +308,7 @@ std::vector<Route> solve_vrp(const Matrix &dist,
     return clusters;
 }
 
-PYBIND11_MODULE(improved_genetic_vrp_final, m) {
+PYBIND11_MODULE(ag_solver, m) {
     m.doc() = "VRP final con splitter por capacidad, GA adaptativo, reubicación y paralelismo";
     m.def("solve_vrp", &solve_vrp,
           py::arg("dist_matrix"), py::arg("demand"), py::arg("capacity"),

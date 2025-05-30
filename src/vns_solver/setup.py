@@ -11,8 +11,8 @@ class get_pybind_include:
 
 ext_modules = [
     Extension(
-        'improved_genetic_vrp_final',
-        ['improved_genetic_vrp_final.cpp'],
+        'vns_solver',
+        ['vns_solver.cpp'],
         include_dirs=[
             get_pybind_include(),
         ],
@@ -22,11 +22,11 @@ ext_modules = [
 ]
 
 setup(
-    name='improved_genetic_vrp_final',
+    name='vns_solver',
     version='0.1',
-    author='TuNombre',
-    author_email='tucorreo@example.com',
-    description='VRP Solver avanzado con GA y mejoras multi-hilo',
+    author='Abel Ponce González',
+    author_email='abelponce03@gmail.com',
+    description='VRP Solver avanzado con VNS y mejoras multi-hilo',
     ext_modules=ext_modules,
     cmdclass={'build_ext': build_ext},
     zip_safe=False,

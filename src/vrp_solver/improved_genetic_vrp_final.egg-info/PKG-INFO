@@ -1,9 +1,0 @@
-Metadata-Version: 2.2
-Name: improved_genetic_vrp_final
-Version: 0.1
-Summary: VRP Solver avanzado con GA y mejoras multi-hilo
-Author: TuNombre
-Author-email: tucorreo@example.com
-Dynamic: author
-Dynamic: author-email
-Dynamic: summary
