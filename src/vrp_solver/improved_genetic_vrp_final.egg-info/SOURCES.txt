@@ -1,7 +1,0 @@
-improved_genetic_vrp_final.cpp
-setup.py
-improved_genetic_vrp_final.egg-info/PKG-INFO
-improved_genetic_vrp_final.egg-info/SOURCES.txt
-improved_genetic_vrp_final.egg-info/dependency_links.txt
-improved_genetic_vrp_final.egg-info/not-zip-safe
-improved_genetic_vrp_final.egg-info/top_level.txt

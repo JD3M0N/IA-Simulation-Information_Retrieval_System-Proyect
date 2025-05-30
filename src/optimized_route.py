@@ -1,7 +1,10 @@
-import sys
-sys.path.append("src/vrp_solver")
-import improved_genetic_vrp_final as vrp_solver
 import networkx as nx
+import sys
+sys.path.append("src/ag_solver")
+import ag_solver as ag_solver
+#sys.path.append("src/vns_solver") 
+#import vns_solver  # Importamos el nuevo solver
+
 
 def expand_route_with_path_nodes(street_graph, route):
     """
@@ -95,7 +98,7 @@ def optimize_delivery_routes(street_graph, start_point, target_points, num_truck
         demands = [0] + target_demands
         
         # Ejecutar el solver VRP
-        routes = vrp_solver.solve_vrp(dist_matrix, demands, truck_capacities)
+        routes = ag_solver.solve_vrp(dist_matrix, demands, truck_capacities)
         
         # Calcular el costo total de las rutas
         total_cost = 0
@@ -131,3 +134,111 @@ def optimize_delivery_routes(street_graph, start_point, target_points, num_truck
         import traceback
         traceback.print_exc()
         return [], 0
+    
+    
+    
+
+
+# El resto de la función expand_route_with_path_nodes permanece igual...
+
+# def optimize_delivery_routes(street_graph, start_point, target_points, num_trucks=1, 
+#                             truck_capacities=None, target_demands=None,
+#                             max_iterations=2000, time_limit=10.0):
+#     """
+#     Optimiza rutas de entrega utilizando el solver VNS avanzado
+    
+#     Args:
+#         street_graph: Grafo de NetworkX con la red de calles
+#         start_point: Nodo de inicio (depósito)
+#         target_points: Lista de nodos objetivo
+#         num_trucks: Número de vehículos disponibles
+#         truck_capacities: Lista de capacidades de los vehículos
+#         target_demands: Lista de demandas para cada punto objetivo
+#         max_iterations: Número máximo de iteraciones para VNS
+#         time_limit: Límite de tiempo en segundos
+    
+#     Returns:
+#         (rutas_optimizadas, costo_total)
+#     """
+#     try:
+#         # Validar y preparar capacidades
+#         if not truck_capacities:
+#             truck_capacities = [100] * num_trucks  # Capacidad por defecto
+#         elif len(truck_capacities) < num_trucks:
+#             # Extender con la última capacidad si faltan valores
+#             truck_capacities.extend([truck_capacities[-1]] * (num_trucks - len(truck_capacities)))
+        
+#         # Validar y preparar demandas
+#         if not target_demands:
+#             target_demands = [1] * len(target_points)  # Demanda por defecto
+#         elif len(target_demands) < len(target_points):
+#             # Extender con la última demanda si faltan valores
+#             target_demands.extend([target_demands[-1]] * (len(target_points) - len(target_demands)))
+        
+#         # Crear matriz de distancias
+#         all_points = [start_point] + target_points
+#         n = len(all_points)
+#         dist_matrix = []
+        
+#         # Inicializar matriz con distancias infinitas
+#         for i in range(n):
+#             row = []
+#             for j in range(n):
+#                 row.append(float('inf'))
+#             dist_matrix.append(row)
+        
+#         # Calcular distancias reales usando el algoritmo de camino más corto
+#         for i in range(n):
+#             # La distancia de un nodo a sí mismo es 0
+#             dist_matrix[i][i] = 0
+#             source = all_points[i]
+            
+#             # Calcular las distancias desde este nodo a todos los demás
+#             try:
+#                 # Usar Dijkstra para calcular las distancias más cortas
+#                 shortest_paths = nx.single_source_dijkstra_path_length(
+#                     street_graph, source, weight='weight')
+                
+#                 for j in range(n):
+#                     target = all_points[j]
+#                     if target in shortest_paths:
+#                         dist_matrix[i][j] = shortest_paths[target]
+#             except nx.NetworkXNoPath:
+#                 print(f"Advertencia: No hay camino desde {source} a algunos destinos")
+#                 continue
+        
+#         # Preparar vector de demandas (incluyendo el depósito como 0)
+#         demands = [0] + target_demands
+        
+#         # Ejecutar el solver VNS
+#         solution = vns_solver.vns_hetero_improved(
+#             dist_matrix, 
+#             demands, 
+#             truck_capacities, 
+#             max_iterations, 
+#             time_limit
+#         )
+        
+#         # Calcular el costo total de las rutas
+#         total_cost = solution.total_cost
+#         final_routes = []
+        
+#         for route in solution.routes:
+#             # Solo procesamos rutas que no estén vacías
+#             if not route.nodes:
+#                 continue
+                
+#             # Convertir índices de ruta a IDs de nodos reales
+#             real_route = [all_points[i] for i in route.nodes]
+#             # Añadir el depósito al principio y final de cada ruta
+#             complete_route = [start_point] + real_route + [start_point]
+#             expanded_route = expand_route_with_path_nodes(street_graph, complete_route)
+#             final_routes.append(expanded_route)
+        
+#         return final_routes, total_cost
+        
+#     except Exception as e:
+#         print(f"Error en la optimización de rutas: {e}")
+#         import traceback
+#         traceback.print_exc()
+#         return [], 0
