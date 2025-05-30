@@ -6,7 +6,38 @@ CONGESTION_ALPHA = 0.5  # Controla la pendiente de la curva logística
 CONGESTION_THRESHOLD = 5  # Umbral a partir del cual la congestión se vuelve significativa
 
 # Número de vehículos a simular (reducido para depuración)
-NUM_VEHICLES = 5
+NUM_VEHICLES = 10000
+
+# Pesos para priorizar tipos de vías
+HIGHWAY_WEIGHTS = {
+    "motorway": 10.0,  # Máxima prioridad para autopistas
+    "trunk": 8.0,      # Alta prioridad para vías troncales
+    "primary": 7.0,    # Prioridad media-alta para vías primarias
+    "secondary": 3.0,  # Prioridad media
+    "tertiary": 2.0,   # Prioridad media-baja
+    "default": 1.0     # Prioridad baja para el resto
+}
+
+def get_edge_weight(street_graph, current, neighbor):
+    """Determina el peso de prioridad para un enlace basado en su tipo de vía"""
+    try:
+        edge_data = street_graph.get_edge_data(current, neighbor, 0)
+        highway_type = edge_data.get('highway_type', 'default')
+        return HIGHWAY_WEIGHTS.get(highway_type, HIGHWAY_WEIGHTS["default"])
+    except Exception:
+        return HIGHWAY_WEIGHTS["default"]
+
+def weighted_choice(choices, weights):
+    """Selecciona un elemento de las opciones basado en los pesos proporcionados"""
+    total = sum(weights)
+    r = random.uniform(0, total)
+    upto = 0
+    for choice, weight in zip(choices, weights):
+        upto += weight
+        if upto >= r:
+            return choice
+    # Por si acaso, devuelve el último elemento
+    return choices[-1] if choices else None
 
 def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles, street_congestion):
     """Inicializa la posición de los vehículos y les asigna rutas aleatorias"""
@@ -63,22 +94,24 @@ def initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles, stree
     print(f"Vehículos inicializados: {len(vehicles)}")
 
 def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion):
-    """Asigna una ruta aleatoria a un vehículo"""
+    """Asigna una ruta aleatoria a un vehículo, priorizando avenidas principales"""
     
     if not all_nodes or len(all_nodes) < 2:
         print("No hay suficientes nodos para asignar rutas")
         return
     
     try:
-        
         current = vehicles[vehicle_id]["current_node"]
         
         # Encontrar nodos conectados
         neighbors = list(street_graph.neighbors(current))
         
         if neighbors:
-            # Elegir un vecino aleatorio como destino
-            destination = random.choice(neighbors)
+            # Calcular pesos para cada vecino basado en el tipo de vía
+            weights = [get_edge_weight(street_graph, current, neighbor) for neighbor in neighbors]
+            
+            # Elegir un vecino con selección ponderada
+            destination = weighted_choice(neighbors, weights)
             
             # Asignar ese nodo como el siguiente en la ruta
             vehicles[vehicle_id]["next_node"] = destination
@@ -101,10 +134,9 @@ def assign_random_route(vehicle_id, street_graph, all_nodes, vehicles, street_co
     except Exception as e:
         print(f"Error asignando ruta para {vehicle_id}: {e}")
 
-def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles,  street_congestion):
-    """Asigna una ruta que mantiene la dirección de movimiento actual"""
+def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles, street_congestion):
+    """Asigna una ruta que mantiene la dirección de movimiento actual, priorizando avenidas principales"""
     try:
-        
         current = vehicles[vehicle_id]["current_node"]
         previous = vehicles[vehicle_id].get("previous_node")
         
@@ -120,12 +152,16 @@ def plan_continuous_route(vehicle_id, street_graph, all_nodes, vehicles,  street
             # Intentar mantener la dirección (no volver al nodo anterior)
             filtered_neighbors = [n for n in neighbors if n != previous]
             if filtered_neighbors:
-                destination = random.choice(filtered_neighbors)
+                # Calcular pesos para cada vecino filtrado
+                weights = [get_edge_weight(street_graph, current, neighbor) for neighbor in filtered_neighbors]
+                destination = weighted_choice(filtered_neighbors, weights)
             else:
-                destination = random.choice(neighbors)
+                # Si solo queda el nodo anterior, usarlo
+                destination = previous
         else:
-            # Sin nodo anterior, simplemente elegir uno aleatorio
-            destination = random.choice(neighbors)
+            # Sin nodo anterior, usar selección ponderada
+            weights = [get_edge_weight(street_graph, current, neighbor) for neighbor in neighbors]
+            destination = weighted_choice(neighbors, weights)
         
         # Guardar el nodo actual como previo para la próxima vez
         vehicles[vehicle_id]["previous_node"] = current
