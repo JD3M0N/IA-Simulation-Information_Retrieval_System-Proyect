@@ -1,7 +1,14 @@
-import React, { useEffect, useState, useRef, memo } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { DeckGL } from "deck.gl";
 import { Map } from "react-map-gl/maplibre";
 import { IconLayer, ScatterplotLayer, PathLayer } from "@deck.gl/layers";
+import OptimizationForm from "./components/OptimizationForm";
+import RouteInfo from "./components/RouteInfo";
+import StatusPanel from "./components/StatusPanel";
+import StatsButton from "./components/StatsButton";
+import StatsModal from "./components/StatsModal";
+import { calculateRouteDistance } from "./utils/distance";
+import { getRouteColor } from "./utils/colors";
 
 // Usa un mapa gratuito de MapLibre en lugar de requerir API key
 const MAP_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=MZjUAQpw10B8E0nsKVQP`;
@@ -13,97 +20,6 @@ const INITIAL_VIEW_STATE = {
   bearing: 0,
   pitch: 0,
 };
-
-// Componente de formulario optimizado con React.memo
-const OptimizationForm = memo(({ 
-  optimizationParams, 
-  setOptimizationParams, 
-  requestOptimization, 
-  setOptimizedRoutes 
-}) => {
-  // Estado local para los valores de entrada
-  const [localStartPoint, setLocalStartPoint] = useState(optimizationParams.start_point);
-  const [localTargetPoints, setLocalTargetPoints] = useState(
-    optimizationParams.target_points.join(',')
-  );
-  const [localNumTrucks, setLocalNumTrucks] = useState(optimizationParams.num_trucks);
-  
-  // Manejar la sincronización del estado local cuando cambian los props
-  useEffect(() => {
-    setLocalStartPoint(optimizationParams.start_point);
-    setLocalTargetPoints(optimizationParams.target_points.join(','));
-    setLocalNumTrucks(optimizationParams.num_trucks);
-  }, [optimizationParams]);
-  
-  // Función para aplicar los cambios al estado principal
-  const applyChanges = () => {
-    setOptimizationParams({
-      ...optimizationParams,
-      start_point: localStartPoint,
-      target_points: localTargetPoints.split(',').map(p => p.trim()).filter(p => p),
-      num_trucks: parseInt(localNumTrucks)
-    });
-  };
-  
-  return (
-    <div style={{
-      position: "absolute",
-      top: "10px",
-      right: "10px",
-      zIndex: 100,
-      padding: "10px",
-      backgroundColor: "rgba(255,255,255,0.8)",
-      borderRadius: "4px",
-      maxWidth: "300px"
-    }}>
-      <h3>Optimización de Rutas</h3>
-      
-      <div>
-        <label>
-          Punto de inicio:
-          <input 
-            type="text" 
-            value={localStartPoint} 
-            onChange={e => setLocalStartPoint(e.target.value)}
-          />
-        </label>
-      </div>
-      
-      <div>
-        <label>
-          Puntos objetivo (separados por coma):
-          <input 
-            type="text" 
-            value={localTargetPoints} 
-            onChange={e => setLocalTargetPoints(e.target.value)}
-          />
-        </label>
-      </div>
-      
-      <div>
-        <label>
-          Número de camiones:
-          <input 
-            type="number" 
-            value={localNumTrucks} 
-            onChange={e => setLocalNumTrucks(e.target.value)}
-          />
-        </label>
-      </div>
-      
-      <button onClick={() => {
-        applyChanges();
-        requestOptimization();
-      }}>
-        Optimizar Rutas
-      </button>
-      
-      <button onClick={() => setOptimizedRoutes([])}>
-        Limpiar Rutas
-      </button>
-    </div>
-  );
-});
 
 function App() {
   const [vehicleData, setVehicleData] = useState({});
@@ -119,6 +35,8 @@ function App() {
     truck_capacities: [10, 10, 10],
     target_demands: {}
   });
+  const [selectedRouteId, setSelectedRouteId] = useState(null);
+  const [showDetailedStats, setShowDetailedStats] = useState(false);
   
   const trailsRef = useRef({});
   const wsRef = useRef(null);
@@ -168,11 +86,15 @@ function App() {
               console.log("Recibidos resultados de optimización:", data);
               
               // Transformar las rutas al formato esperado por PathLayer
+              // y calcular la distancia una sola vez
               const routes = data.routes.map((route, idx) => {
+                const path = route.map(point => [point.lon, point.lat]);
                 return {
                   id: `route-${idx}`,
-                  path: route.map(point => [point.lon, point.lat]),
-                  color: getRouteColor(idx)
+                  path: path,
+                  color: getRouteColor(idx),
+                  distance: calculateRouteDistance(path), // Calculamos la distancia una sola vez
+                  vehicleId: `Camión ${idx + 1}`
                 };
               });
               
@@ -232,21 +154,17 @@ function App() {
     }
   };
   
-  // Función para generar colores de ruta distintos
-  const getRouteColor = (index) => {
-    const colors = [
-      [255, 0, 0],    // Rojo
-      [0, 128, 255],  // Azul
-      [0, 204, 0],    // Verde
-      [255, 102, 0],  // Naranja
-      [153, 51, 255], // Púrpura
-      [255, 204, 0],  // Amarillo
-      [0, 204, 204],  // Turquesa
-      [255, 0, 255],  // Magenta
-    ];
-    
-    return colors[index % colors.length];
+
+  // Función para manejar la selección de rutas
+  const handleRouteSelect = (routeId) => {
+    setSelectedRouteId(routeId === selectedRouteId ? null : routeId);
   };
+
+  // Preparar rutas con propiedad de selección
+  const routesWithSelection = optimizedRoutes.map(route => ({
+    ...route,
+    selected: route.id === selectedRouteId
+  }));
 
   const layers = [
     // Capa para rutas optimizadas
@@ -254,11 +172,29 @@ function App() {
       id: 'optimized-routes',
       data: optimizedRoutes,
       pickable: true,
-      widthScale: 10,
+      widthScale: 1,
       widthMinPixels: 2,
       getPath: d => d.path,
-      getColor: d => d.color,
-      getWidth: 5
+      getColor: d => d.id === selectedRouteId ? [255, 255, 255] : d.color,
+      getWidth: d => d.id === selectedRouteId ? 8 : 5,
+      onHover: (info) => {
+        // Actualiza el tooltip si se necesita
+      },
+      // Información que se mostrará al pasar el cursor
+      getTooltip: (obj) => {
+        if (obj.object) {
+          return {
+            html: `
+              <div>
+                <b>${obj.object.vehicleId}</b><br/>
+                Distancia: ${obj.object.distance.toFixed(2)} km<br/>
+                Puntos: ${obj.object.path.length}
+              </div>
+            `
+          };
+        }
+        return null;
+      }
     }),
     
     // Capas existentes
@@ -289,34 +225,17 @@ function App() {
     }),
   ];
   
+  // Agregamos un panel para mostrar la información de las rutas
   return (
     <>
-      {/* Panel de estado existente */}
-      <div
-        style={{
-          position: "absolute",
-          top: "10px",
-          left: "10px",
-          zIndex: 100,
-          padding: "10px",
-          backgroundColor: "rgba(255,255,255,0.7)",
-          borderRadius: "4px",
-          maxWidth: "300px",
-        }}
-      >
-        <div>
-          <strong>Estado:</strong> {connectionStatus}
-        </div>
-        {errorMessage && (
-          <div style={{ color: "red" }}>{errorMessage}</div>
-        )}
-        <div>
-          <strong>Vehículos:</strong> {Object.keys(vehicleData).length}
-        </div>
-        <button onClick={() => setShowOptimizationForm(!showOptimizationForm)}>
-          {showOptimizationForm ? "Ocultar Optimización" : "Mostrar Optimización"}
-        </button>
-      </div>
+      {/* Panel de estado extraído como componente */}
+      <StatusPanel 
+        connectionStatus={connectionStatus}
+        errorMessage={errorMessage}
+        vehicleCount={Object.keys(vehicleData).length}
+        showOptimizationForm={showOptimizationForm}
+        setShowOptimizationForm={setShowOptimizationForm}
+      />
       
       {/* Formulario de optimización */}
       {showOptimizationForm && 
@@ -327,6 +246,29 @@ function App() {
           setOptimizedRoutes={setOptimizedRoutes}
         />
       }
+      
+      {/* Panel mejorado para mostrar información de rutas */}
+      {optimizedRoutes.length > 0 && (
+        <>
+          <RouteInfo 
+            routes={routesWithSelection} 
+            onSelectRoute={handleRouteSelect} 
+          />
+          
+          {/* Botón para mostrar/ocultar estadísticas detalladas */}
+          <StatsButton 
+            showDetailedStats={showDetailedStats}
+            setShowDetailedStats={setShowDetailedStats}
+          />
+          
+          {/* Panel de estadísticas detalladas */}
+          <StatsModal 
+            showDetailedStats={showDetailedStats}
+            setShowDetailedStats={setShowDetailedStats}
+            optimizedRoutes={optimizedRoutes}
+          />
+        </>
+      )}
       
       <DeckGL
         initialViewState={INITIAL_VIEW_STATE}
