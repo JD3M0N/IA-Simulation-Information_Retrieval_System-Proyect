@@ -1,7 +1,5 @@
-// improved_genetic_vrp_final.cpp
-// VRP solucionado en múltiples capas, respetando capacidades individuales, con GA local adaptativo,
-// Clarke–Wright con capacidades específicas, inter-relocation y swap inter-cluster,
-// y parada temprana basada en convergencia.
+// improved_genetic_vrp_param.cpp
+// VRP con GA parametrizable desde Python mediante pybind11
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -18,7 +16,7 @@ using Matrix = std::vector<std::vector<double>>;
 using Route  = std::vector<int>;
 using Demand = std::vector<int>;
 
-static std::mt19937 rng((unsigned)std::chrono::high_resolution_clock::now()
+static std::mt19937 base_rng((unsigned)std::chrono::high_resolution_clock::now()
                             .time_since_epoch().count());
 
 // --- 1. Evaluación de ruta (retorno al depósito) ---
@@ -61,7 +59,7 @@ void two_opt(Route &r, const Matrix &dist) {
 
 // --- 3. Order Crossover (OX) ---
 
-Route order_crossover(const Route &p1, const Route &p2) {
+Route order_crossover(const Route &p1, const Route &p2, std::mt19937 &rng) {
     int n = p1.size();
     std::uniform_int_distribution<int> dist(0, n - 1);
     int i = dist(rng), j = dist(rng);
@@ -91,14 +89,12 @@ std::vector<Route> clarke_wright(const Matrix &dist,
     int n = dem.size() - 1;
     int k = cap.size();
     std::vector<Saving> savings;
-    // calcular ahorros
     savings.reserve(n * (n - 1) / 2);
     for (int i = 1; i <= n; ++i)
         for (int j = i + 1; j <= n; ++j)
             savings.push_back({i, j, dist[0][i] + dist[0][j] - dist[i][j]});
     std::sort(savings.begin(), savings.end(), [](auto &a, auto &b){ return a.val > b.val; });
 
-    // rutas iniciales
     std::vector<Route> routes(n);
     std::vector<int> rid(n+1), load(n);
     for (int i = 1; i <= n; ++i) {
@@ -107,23 +103,19 @@ std::vector<Route> clarke_wright(const Matrix &dist,
         load[i-1] = dem[i];
     }
 
-    // fusión guardando capacidades específicas
     for (auto &s : savings) {
         int r1 = rid[s.i], r2 = rid[s.j];
         if (r1 == r2) continue;
         int new_load = load[r1] + load[r2];
-        // buscar si existe camión con capacidad >= new_load
         bool feasible = false;
         for (int c : cap) {
             if (c >= new_load) { feasible = true; break; }
         }
         if (!feasible) continue;
-        // aseguramos i y j en extremos
         auto &R1 = routes[r1], &R2 = routes[r2];
         bool e1 = (R1.front()==s.i || R1.back()==s.i);
         bool e2 = (R2.front()==s.j || R2.back()==s.j);
         if (!e1 || !e2) continue;
-        // unir R2 a R1
         if (R1.back()==s.i) {
             if (R2.front()==s.j)           R1.insert(R1.end(),   R2.begin(), R2.end());
             else { std::reverse(R2.begin(), R2.end()); R1.insert(R1.end(), R2.begin(), R2.end()); }
@@ -134,34 +126,39 @@ std::vector<Route> clarke_wright(const Matrix &dist,
             } else
                 R1.insert(R1.begin(), R2.begin(), R2.end());
         }
-        // actualizar
         load[r1] = new_load;
         for (int nd : R2) rid[nd] = r1;
         routes[r2].clear(); load[r2] = 0;
-        // comprobar si quedan rutas <= k
         int cnt = 0;
         for (auto &R : routes) if (!R.empty()) ++cnt;
         if (cnt <= k) break;
     }
 
-    // recoger primeras k rutas
     std::vector<Route> out;
     out.reserve(k);
     for (auto &R : routes) if (!R.empty()) {
         out.push_back(R);
         if ((int)out.size() == k) break;
     }
-    // asegurar k rutas
     while ((int)out.size() < k) out.push_back({});
     return out;
 }
 
-// --- 5. GA local con parada temprana ---
+// --- 5. GA local con parámetros ---
 
-Route local_ga(const Route &init, const Matrix &dist) {
+Route local_ga(const Route &init,
+               const Matrix &dist,
+               int pop_size,
+               int sel_size,
+               int max_gen,
+               int no_improve_limit,
+               double mut_rate,
+               unsigned seed) {
     int m = init.size();
     if (m < 2) return init;
-    int pop_size = 50, sel = 20, max_gen = 100;
+    std::mt19937 rng(seed);
+
+    int sel = sel_size;
     int no_improve = 0;
     double best_overall = std::numeric_limits<double>::infinity();
     Route best_route;
@@ -179,34 +176,29 @@ Route local_ga(const Route &init, const Matrix &dist) {
     auto fitness = [&](const Route &r){ return route_distance(r, dist); };
 
     for (int gen = 0; gen < max_gen; ++gen) {
-        // evaluar y ordenar
         std::vector<std::pair<double, Route>> scored;
         scored.reserve(pop_size);
         for (auto &r : P) scored.emplace_back(fitness(r), r);
         std::sort(scored.begin(), scored.end(), [](auto &a, auto &b){ return a.first < b.first; });
 
-        // actualizar mejor global y parada temprana
         if (scored[0].first + 1e-6 < best_overall) {
             best_overall = scored[0].first;
             best_route = scored[0].second;
             no_improve = 0;
-        } else {
-            if (++no_improve >= 20) break; // si no mejora en 20 gen, parar
-        }
+        } else if (++no_improve >= no_improve_limit) break;
 
-        // selección elitista
         std::vector<Route> selected;
         selected.reserve(sel);
         for (int i = 0; i < sel; ++i) selected.push_back(scored[i].second);
 
-        // reproducir
         P = selected;
-        std::uniform_int_distribution<int> d(0, sel - 1);
+        std::uniform_real_distribution<double> unif(0, 1);
+        std::uniform_int_distribution<int> idx_dist(0, sel - 1);
         while ((int)P.size() < pop_size) {
-            auto &p1 = selected[d(rng)];
-            auto &p2 = selected[d(rng)];
-            Route c = order_crossover(p1, p2);
-            if (std::uniform_real_distribution<>(0, 1)(rng) < 0.3) two_opt(c, dist);
+            auto &p1 = selected[idx_dist(rng)];
+            auto &p2 = selected[idx_dist(rng)];
+            Route c = order_crossover(p1, p2, rng);
+            if (unif(rng) < mut_rate) two_opt(c, dist);
             P.push_back(c);
         }
     }
@@ -219,13 +211,14 @@ void inter_improve(std::vector<Route> &C,
                    const Matrix &dist,
                    const Demand &dem,
                    const std::vector<int> &cap) {
-    int k = C.size();
     bool moved = true;
+    int k = C.size();
     while (moved) {
         moved = false;
         // relocation
         for (int a = 0; a < k && !moved; ++a) {
-            for (int b = 0; b < k && !moved; ++b) if (a != b) {
+            for (int b = 0; b < k && !moved; ++b) {
+                if (a == b) continue;
                 int load_a = std::accumulate(C[a].begin(), C[a].end(), 0,
                                 [&](int s, int x){ return s + dem[x]; });
                 int load_b = std::accumulate(C[b].begin(), C[b].end(), 0,
@@ -233,84 +226,78 @@ void inter_improve(std::vector<Route> &C,
                 for (int i = 0; i < (int)C[a].size(); ++i) {
                     int node = C[a][i];
                     if (load_b + dem[node] > cap[b]) continue;
-                    Route Ra = C[a]; Ra.erase(Ra.begin() + i);
-                    Route Rb = C[b]; Rb.push_back(node);
+                    auto Ra = C[a]; Ra.erase(Ra.begin() + i);
+                    auto Rb = C[b]; Rb.push_back(node);
                     double oldd = route_distance(C[a], dist) + route_distance(C[b], dist);
                     double newd = route_distance(Ra, dist) + route_distance(Rb, dist);
-                    if (newd + 1e-6 < oldd) {
-                        C[a] = Ra; C[b] = Rb;
-                        moved = true;
-                        break;
-                    }
+                    if (newd + 1e-6 < oldd) { C[a] = Ra; C[b] = Rb; moved = true; break; }
                 }
             }
         }
         if (moved) continue;
-        // swap pairwise
-        for (int a = 0; a < k && !moved; ++a) {
-            for (int b = a+1; b < k && !moved; ++b) {
-                int la = std::accumulate(C[a].begin(), C[a].end(), 0,
-                            [&](int s,int x){return s+dem[x];});
-                int lb = std::accumulate(C[b].begin(), C[b].end(), 0,
-                            [&](int s,int x){return s+dem[x];});
-                for (int i = 0; i < (int)C[a].size() && !moved; ++i) {
-                    for (int j = 0; j < (int)C[b].size(); ++j) {
-                        int na = C[a][i], nb = C[b][j];
-                        if (la - dem[na] + dem[nb] > cap[a] ||
-                            lb - dem[nb] + dem[na] > cap[b]) continue;
-                        Route Ra = C[a], Rb = C[b];
-                        std::swap(Ra[i], Rb[j]);
-                        double oldd = route_distance(C[a],dist)+route_distance(C[b],dist);
-                        double newd = route_distance(Ra,dist)+route_distance(Rb,dist);
-                        if (newd +1e-6<oldd) {
-                            C[a]=Ra; C[b]=Rb;
-                            moved = true;
-                            break;
-                        }
-                    }
-                }
+        // swap inter-cluster similar a antes...
+        // (sin cambios)
+        int la, lb;
+        for (int a = 0; a < k && !moved; ++a) for (int b = a+1; b < k && !moved; ++b) {
+            la = std::accumulate(C[a].begin(), C[a].end(), 0, [&](int s,int x){return s+dem[x];});
+            lb = std::accumulate(C[b].begin(), C[b].end(), 0, [&](int s,int x){return s+dem[x];});
+            for (int i = 0; i < (int)C[a].size() && !moved; ++i) for (int j = 0; j < (int)C[b].size(); ++j) {
+                int na = C[a][i], nb = C[b][j];
+                if (la - dem[na] + dem[nb] > cap[a] || lb - dem[nb] + dem[na] > cap[b]) continue;
+                auto Ra = C[a], Rb = C[b]; std::swap(Ra[i], Rb[j]);
+                double oldd = route_distance(C[a],dist)+route_distance(C[b],dist);
+                double newd = route_distance(Ra,dist)+route_distance(Rb,dist);
+                if (newd +1e-6<oldd) { C[a]=Ra; C[b]=Rb; moved=true; break; }
             }
         }
     }
 }
 
-// --- 7. Solver integrado y paralelo opcional ---
+// --- 7. Solver integrado y paralelizable ---
 
 std::vector<Route> solve_vrp(const Matrix &dist,
                               const Demand &dem,
-                              const std::vector<int> &cap) {
+                              const std::vector<int> &cap,
+                              int pop_size = 50,
+                              int sel_size = 20,
+                              int max_gen = 100,
+                              int no_improve_limit = 20,
+                              double mut_rate = 0.3) {
     int k = cap.size();
-    
-    // a) clustering inicial
+    // clustering inicial
     auto clusters = clarke_wright(dist, dem, cap);
-    
-    // b) GA local en paralelo
+    // GA local en paralelo
     std::vector<std::thread> threads;
+    threads.reserve(k);
     for (int i = 0; i < k; ++i) {
-        threads.emplace_back([&, i]() {
-            clusters[i] = local_ga(clusters[i], dist);
+        unsigned seed = base_rng();
+        threads.emplace_back([&, i, seed]() {
+            clusters[i] = local_ga(clusters[i], dist,
+                                   pop_size, sel_size, max_gen,
+                                   no_improve_limit, mut_rate,
+                                   seed);
         });
     }
     for (auto &t : threads) t.join();
-    
-    // c) inter-cluster improvements
+    // mejoras inter-cluster
     inter_improve(clusters, dist, dem, cap);
-    
-    // d) refinamiento final 2-opt en paralelo
-    threads.clear();
+    // refinamiento final 2-opt en paralelo
+    threads.clear(); threads.reserve(k);
     for (int i = 0; i < k; ++i) {
-        threads.emplace_back([&, i]() {
-            two_opt(clusters[i], dist);
-        });
+        threads.emplace_back([&, i]() { two_opt(clusters[i], dist); });
     }
     for (auto &t : threads) t.join();
-    
     return clusters;
 }
 
 PYBIND11_MODULE(ag_solver, m) {
-    m.doc() = "VRP final con splitter por capacidad, GA adaptativo, reubicación y paralelismo";
+    m.doc() = "VRP avanzado multi-hilo con GA parametrizable";
     m.def("solve_vrp", &solve_vrp,
           py::arg("dist_matrix"), py::arg("demand"), py::arg("capacity"),
-          "Solver VRP avanzado multi-hilo");
+          py::arg("pop_size") = 50,
+          py::arg("sel_size") = 20,
+          py::arg("max_gen") = 100,
+          py::arg("no_improve_limit") = 20,
+          py::arg("mut_rate") = 0.3,
+          "Solver VRP con parámetros GA ajustables desde Python");
 }

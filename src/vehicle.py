@@ -6,7 +6,7 @@ CONGESTION_ALPHA = 0.5  # Controla la pendiente de la curva logística
 CONGESTION_THRESHOLD = 5  # Umbral a partir del cual la congestión se vuelve significativa
 
 # Número de vehículos a simular (reducido para depuración)
-NUM_VEHICLES = 10000
+NUM_VEHICLES = 5
 
 # Pesos para priorizar tipos de vías
 HIGHWAY_WEIGHTS = {
