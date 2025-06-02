@@ -1,10 +1,13 @@
 import networkx as nx
 import sys
-sys.path.append("src/ag_solver")
+sys.path.append("src/metaheuristic/ag_solver")
 import ag_solver as ag_solver
-#sys.path.append("src/vns_solver") 
-#import vns_solver  # Importamos el nuevo solver
-
+sys.path.append("src/metaheuristic/vns_solver") 
+import vns_solver 
+sys.path.append("src/metaheuristic/sa_solver") 
+import sa_solver 
+sys.path.append("src/metaheuristic/ts_solver") 
+import ts_solver  
 
 def expand_route_with_path_nodes(street_graph, route):
     """
@@ -97,16 +100,53 @@ def optimize_delivery_routes(street_graph, start_point, target_points, num_truck
         # Preparar vector de demandas (incluyendo el depósito como 0)
         demands = [0] + target_demands
         
-        # Ejecutar el solver VRP
-        routes = ag_solver.solve_vrp(
-            dist_matrix, 
-            demands, 
-            truck_capacities, 
-            pop_size=400,
-            sel_size=40,
-            max_gen=1000,
-            no_improve_limit=20,
-            mut_rate=0.3)
+        # ////////// GENETIC ALGORITHM SOLVER //////////
+        # routes = ag_solver.solve_vrp(
+        #     dist_matrix, 
+        #     demands, 
+        #     truck_capacities, 
+        #     pop_size=400,
+        #     sel_size=40,
+        #     max_gen=1000,
+        #     no_improve_limit=20,
+        #     mut_rate=0.3)
+        
+        # ////////// SIMULATED ANNEALING SOLVER //////////
+
+        # Ejecutar el solver Simulated Annealing
+        routes = sa_solver.solve(
+            N=n,  # Número total de nodos (incluyendo el depósito)
+            T=num_trucks,  # Número de vehículos
+            capacity=truck_capacities,  # Capacidades de cada vehículo
+            demand=demands,  # Demandas de cada nodo
+            distMat=dist_matrix,  # Matriz de distancias
+            T0=100.0,  # Temperatura inicial
+            Tf=0.1,  # Temperatura final
+            alpha=0.98,  # Factor de enfriamiento
+            iterPerTemp=100,  # Iteraciones por nivel de temperatura
+            lambdaPen=1000.0,  # Penalización por usar más vehículos
+            maxSeconds=30.0,  # Tiempo máximo de ejecución en segundos
+            seed=42  # Semilla aleatoria para reproducibilidad
+        )
+        
+        # Preparar los objetivos (índices de 1 a n-1, excluyendo el depósito)
+        objectives = list(range(1, n))
+        
+        
+        # ////////// TABU SEARCH SOLVER //////////
+        
+        # Ejecutar el solver Tabu Search
+        # routes = ts_solver.solve_vrp(
+        #     dist_matrix,
+        #     objectives,
+        #     demands,
+        #     truck_capacities,
+        #     num_trucks,
+        #     max_iter=1000,
+        #     base_tabu_tenure=20,
+        #     no_improve_limit=200,
+        #     diversification_interval=500
+        # )
         
         # Calcular el costo total de las rutas
         total_cost = 0
