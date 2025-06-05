@@ -54,14 +54,13 @@ class TrafficCrawler(BaseCrawler):
         4. (Opcional) Extrae el resumen (primer párrafo dentro de <div class="td-excerpt">).
         """
         html = response.text
-        print("HTML recuperado: " + html)
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "lxml")
 
         resultados: List[Dict[str, Any]] = []
 
-        # 1) Encontrar todos los <article> en la página
-        #    (en Cubadebate cada noticia suele ir dentro de un <article> con múltiples clases)
-        articulos = soup.find_all("article")
+        # 1) Encontrar <div> donde se encuentran los articulos
+        articulos = soup.find('div', id='archive')
+        print("ID del espacio div donde se encuentran los articulos " + articulos['id'])
 
         for art in articulos:
             # 2) Extraer el título y la URL del artículo
