@@ -60,37 +60,39 @@ class TrafficCrawler(BaseCrawler):
 
         # 1) Encontrar <div> donde se encuentran los articulos
         articulos = soup.find('div', id='archive')
-        print("ID del espacio div donde se encuentran los articulos " + articulos['id'])
+        print("Antes de entrar al ciclo")
 
-        for art in articulos:
+        for art in articulos.find_all('div'):
+            print("Dentro del ciclo ")
+            print(art.name)  # Testing
+
             # 2) Extraer el título y la URL del artículo
-            h3 = art.find("h3", class_="entry-title")  # <h3 class="entry-title td-module-title">
+            h3 = art.find('h3')  # Titulo del articulo
             if not h3:
-                continue  # Si no hay <h3 class="entry-title">, pasamos al siguiente <article>
+                continue  
 
-            enlace = h3.find("a")
-            if not enlace or not enlace.get("href"):
+            enlace = h3.find('a')
+            if not enlace or not enlace.get('href'):
                 continue
 
             titulo = enlace.get_text(strip=True)
-            url = enlace["href"].strip()
+            url = enlace['href'].strip()
 
             # 3) Extraer fecha de publicación
-            #    La fecha va en <time class="entry-date updated td-module-date" datetime="...">
-            time_tag = art.find("time", class_="entry-date")
+            time_tag = art.find('div', class_='meta')
             fecha_iso: Optional[str] = None
-            if time_tag and time_tag.has_attr("datetime"):
-                fecha_iso = time_tag["datetime"].strip()
+            if time_tag and time_tag.has_attr('datetime'):
+                fecha_iso = time_tag['datetime'].strip()
             else:
                 # Si no encontró el atributo “datetime”, podemos intentar leer el texto interno
                 fecha_iso = time_tag.get_text(strip=True) if time_tag else None
 
             # 4) (Opcional) Extraer un snippet / resumen breve
             snippet = None
-            excerpt_div = art.find("div", class_="td-excerpt")
+            excerpt_div = art.find('div', class_='excerpt')
             if excerpt_div:
                 # Tomamos el primer <p> interno, si existe
-                p = excerpt_div.find("p")
+                p = excerpt_div.find('p')
                 if p:
                     snippet = p.get_text(strip=True)
 
