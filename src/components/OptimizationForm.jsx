@@ -1,33 +1,37 @@
-import React, { useState, useEffect, memo } from "react";
+import React, { useState, memo } from "react";
 
-const OptimizationForm = memo(({ 
-  optimizationParams, 
-  setOptimizationParams, 
-  requestOptimization, 
-  setOptimizedRoutes 
-}) => {
-  // Estado local para los valores de entrada
-  const [localStartPoint, setLocalStartPoint] = useState(optimizationParams.start_point);
-  const [localTargetPoints, setLocalTargetPoints] = useState(
-    optimizationParams.target_points.join(',')
-  );
-  const [localNumTrucks, setLocalNumTrucks] = useState(optimizationParams.num_trucks);
+const OptimizationForm = memo(({ onSubmit, setOptimizedRoutes }) => {
+  const [localStartPoint, setLocalStartPoint] = useState("");
+  const [localTargetPoints, setLocalTargetPoints] = useState("");
+  const [localNumTrucks, setLocalNumTrucks] = useState(3);
   
-  // Manejar la sincronización del estado local cuando cambian los props
-  useEffect(() => {
-    setLocalStartPoint(optimizationParams.start_point);
-    setLocalTargetPoints(optimizationParams.target_points.join(','));
-    setLocalNumTrucks(optimizationParams.num_trucks);
-  }, [optimizationParams]);
+  const handleOptimize = () => {
+    // Validación local antes de enviar
+    if (
+      localStartPoint.trim() === "" ||
+      localTargetPoints.split(",").map(p => p.trim()).filter(p => p).length === 0
+    ) {
+      alert("Por favor, escriba un punto de inicio y al menos un nodo objetivo.");
+      return;
+    }
+
+    const optimizationData = {
+      start_point: localStartPoint.trim(),
+      target_points: localTargetPoints
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p),
+      num_trucks: parseInt(localNumTrucks, 10),
+      truck_capacities: [10, 10, 10],
+      target_demands: {}
+    };
+    
+    onSubmit(optimizationData);
+  };
   
-  // Función para aplicar los cambios al estado principal
-  const applyChanges = () => {
-    setOptimizationParams({
-      ...optimizationParams,
-      start_point: localStartPoint,
-      target_points: localTargetPoints.split(',').map(p => p.trim()).filter(p => p),
-      num_trucks: parseInt(localNumTrucks)
-    });
+  const handleClear = () => {
+    // Solo limpiamos las rutas en el mapa, sin tocar los valores del formulario
+    setOptimizedRoutes([]);
   };
   
   return (
@@ -82,10 +86,7 @@ const OptimizationForm = memo(({
       
       <div style={{ display: "flex", gap: "10px" }}>
         <button 
-          onClick={() => {
-            applyChanges();
-            requestOptimization();
-          }}
+          onClick={handleOptimize}
           style={{
             flex: 1,
             padding: "8px",
@@ -100,7 +101,7 @@ const OptimizationForm = memo(({
         </button>
         
         <button 
-          onClick={() => setOptimizedRoutes([])}
+          onClick={handleClear}
           style={{
             flex: 1,
             padding: "8px",

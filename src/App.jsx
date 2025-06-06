@@ -143,11 +143,20 @@ function App() {
   }, []);
 
   // Función para enviar solicitud de optimización
-  const requestOptimization = () => {
+  const requestOptimization = (params) => {
+    // Si params es null, solo limpiamos las rutas sin enviar petición
+    if (params === null) {
+      setOptimizedRoutes([]);
+      return;
+    }
+    
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Limpiar rutas antiguas antes de solicitar nuevas
+      setOptimizedRoutes([]);
+      
       wsRef.current.send(JSON.stringify({
         type: 'optimization_request',
-        ...optimizationParams
+        ...params
       }));
     } else {
       setErrorMessage("No hay conexión con el servidor");
@@ -240,10 +249,16 @@ function App() {
       {/* Formulario de optimización */}
       {showOptimizationForm && 
         <OptimizationForm 
-          optimizationParams={optimizationParams}
-          setOptimizationParams={setOptimizationParams}
-          requestOptimization={requestOptimization}
+          onSubmit={requestOptimization}
           setOptimizedRoutes={setOptimizedRoutes}
+          initialValues={{
+            start_point: "",
+            target_points: [],
+            num_trucks: 3,
+            truck_capacities: [10, 10, 10],
+            target_demands: {},
+            ...(optimizationParams || {})
+          }} 
         />
       }
       
@@ -282,3 +297,4 @@ function App() {
 }
 
 export default App;
+
