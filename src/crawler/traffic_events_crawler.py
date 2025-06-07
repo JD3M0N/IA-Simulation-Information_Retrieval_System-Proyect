@@ -12,11 +12,11 @@ class TrafficCrawler(BaseCrawler):
 
     Para cada artículo listado en:
       http://www.cubadebate.cu/etiqueta/ministerio-de-transporte-mitrans/
-    extrae:
+    se extrae:
       - título
       - URL del artículo
-      - fecha de publicación (datetime ISO)
-      - (opcional) un breve párrafo de resumen
+      - fecha de publicación
+      - un breve párrafo de resumen
     """
 
     def __init__(
@@ -24,23 +24,20 @@ class TrafficCrawler(BaseCrawler):
         retries: int = 3,
         delay: float = 1.0,
     ):
-        """
-        :param retries: Número de reintentos en caso de fallo de red
-        :param delay: Pausa (en segundos) entre cada reintento
-        """
+
         # 1) Definimos la URL de la etiqueta “MITRANS” en Cubadebate
         base_url = "http://www.cubadebate.cu/etiqueta/ministerio-de-transporte-mitrans/"
         super().__init__(base_url=base_url, retries=retries, delay=delay)
 
     def crawl(self) -> List[Dict[str, Any]]:
         """
-        1. Llama a self.fetch() para descargar el HTML de la página de MITRANS.
+        1. Llama a self.fetch() para descargar el HTML de la página.
         2. Llama a self.parse() para extraer los datos.
-        3. Devuelve una lista de diccionarios con la info de cada artículo.
+        3. Devuelve una lista de diccionarios(hasta ahora) con la info de cada artículo.
         """
         response = self.fetch()
+
         if not response:
-            # Si fetch() devolvió None, retornamos una lista vacía
             print("HTML no recuperado")
             return []
 
@@ -49,9 +46,9 @@ class TrafficCrawler(BaseCrawler):
     def parse(self, response: requests.Response) -> List[Dict[str, Any]]:
         """
         1. Convierte la respuesta text en un objeto BeautifulSoup.
-        2. Busca todos los <article> que representen noticias.
+        2. Busca todos los articulos que representen noticias.
         3. Para cada artículo extrae título, link y fecha.
-        4. (Opcional) Extrae el resumen (primer párrafo dentro de <div class="td-excerpt">).
+        4. Extrae el resumen.
         """
         html = response.text
         soup = BeautifulSoup(html, "lxml")
@@ -60,10 +57,9 @@ class TrafficCrawler(BaseCrawler):
 
         # 1) Encontrar <div> donde se encuentran los articulos
         articulos = soup.find('div', id='archive')
-        print("Antes de entrar al ciclo")
 
         for art in articulos.find_all('div'):
-            print("Dentro del ciclo ")
+
             print(art.name)  # Testing
 
             # 2) Extraer el título y la URL del artículo
