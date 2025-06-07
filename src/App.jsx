@@ -2,11 +2,14 @@
 import React, { useEffect, useState, useRef } from "react";
 import { DeckGL } from "deck.gl";
 import { Map } from "react-map-gl/maplibre";
-import { ScatterplotLayer, PathLayer } from "@deck.gl/layers";
-import ProductList from "./components/ProductList";
-import TruckList from "./components/TruckList";
-import { INITIAL_TRUCKS } from "./data/trucks";
-import { assignOrdersToTrucks } from "./utils/assignOrders";
+import { IconLayer, ScatterplotLayer, PathLayer } from "@deck.gl/layers";
+import OptimizationForm from "./components/OptimizationForm";
+import RouteInfo from "./components/RouteInfo";
+import StatusPanel from "./components/StatusPanel";
+import StatsButton from "./components/StatsButton";
+import StatsModal from "./components/StatsModal";
+import { calculateRouteDistance } from "./utils/distance";
+import { getRouteColor } from "./utils/colors";
 
 // Mapa MapLibre
 const MAP_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=MZjUAQpw10B8E0nsKVQP`;
@@ -24,123 +27,269 @@ function App() {
   const [products, setProducts] = useState([]);
   const [trucks, setTrucks] = useState([]);
   const [vehicleData, setVehicleData] = useState({});
+  const [trafficLights, setTrafficLights] = useState([]);
+  const [connectionStatus, setConnectionStatus] = useState("Conectando...");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [optimizedRoutes, setOptimizedRoutes] = useState([]);
+  const [showOptimizationForm, setShowOptimizationForm] = useState(false);
+  const [optimizationParams, setOptimizationParams] = useState({
+    start_point: "",
+    target_points: [],
+    num_trucks: 3,
+    truck_capacities: [10, 10, 10],
+    target_demands: {}
+  });
+  const [selectedRouteId, setSelectedRouteId] = useState(null);
+  const [showDetailedStats, setShowDetailedStats] = useState(false);
+  
   const trailsRef = useRef({});
   const wsRef = useRef(null);
 
   // 1) Cargamos pedidos de demo
   useEffect(() => {
-    const demo = [
-      { id: 1, name: "Camisetas", quantity: 20, express: false },
-      { id: 2, name: "Zapatos", quantity: 10, express: true },
-      { id: 3, name: "Gafas de sol", quantity: 5, express: false },
-      { id: 4, name: "Sombreros", quantity: 30, express: false },
-      { id: 5, name: "Bolsos", quantity: 25, express: true },
-      { id: 6, name: "Bufandas", quantity: 15, express: false }
-    ];
-    setProducts(demo);
-  }, []);
+    // Manejo mejorado de la conexión WebSocket
+    const connectWebSocket = () => {
+      try {
+        console.log("Intentando conectar al WebSocket...");
+        const ws = new WebSocket("ws://localhost:8765");
+        wsRef.current = ws;
 
-  // 2) Asignamos pedidos a camiones, inicializamos posición/color
-  useEffect(() => {
-    if (products.length === 0) return;
-    // inicial
-    const colored = INITIAL_TRUCKS.map((t, i) => ({
-      ...t,
-      position: [-82.3490351, 23.1298784],      // parten del almacén
-      color: [(i + 1) * 40 % 255, (i + 2) * 70 % 255, (i + 3) * 100 % 255]
-    }));
-    const assigned = assignOrdersToTrucks(products, colored);
-    setTrucks(assigned);
-  }, [products]);
+        ws.onopen = () => {
+          console.log("Conexión WebSocket establecida");
+          setConnectionStatus("Conectado");
+          setErrorMessage("");
+        };
 
-  // 3) Conexión WebSocket (igual que antes) para vehículos
-  useEffect(() => {
-    const connect = () => {
-      const ws = new WebSocket("ws://localhost:8765");
-      wsRef.current = ws;
-      ws.onmessage = e => {
-        const { vehicles } = JSON.parse(e.data);
-        const updated = {};
-        vehicles.forEach(v => {
-          const prev = trailsRef.current[v.id] || [];
-          const trail = [...prev.slice(-20), [v.lon, v.lat]];
-          trailsRef.current[v.id] = trail;
-          updated[v.id] = {
-            position: [v.lon, v.lat],
-            trail,
-            color: getVehicleColor(v.id)
-          };
-        });
-        setVehicleData(updated);
-      };
-      ws.onclose = () => setTimeout(connect, 3000);
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            // Si es una actualización de posiciones
+            if (data.vehicles) {
+              console.log(`Recibidos datos para ${data.vehicles.length} vehículos`);
+              
+              const updated = {};
+              data.vehicles.forEach((v) => {
+                const prevTrail = trailsRef.current[v.id] || [];
+                const newTrail = [...prevTrail.slice(-20), [v.lon, v.lat]];
+                trailsRef.current[v.id] = newTrail;
+
+                updated[v.id] = {
+                  id: v.id,
+                  position: [v.lon, v.lat],
+                  trail: newTrail,
+                  color: 0,
+                };
+              });
+
+              setVehicleData(updated);
+              setTrafficLights(data.traffic_lights || []);
+            }
+            
+            // Si es una respuesta de optimización
+            if (data.type === 'optimization_result') {
+              console.log("Recibidos resultados de optimización:", data);
+              
+              // Transformar las rutas al formato esperado por PathLayer
+              // y calcular la distancia una sola vez
+              const routes = data.routes.map((route, idx) => {
+                const path = route.map(point => [point.lon, point.lat]);
+                return {
+                  id: `route-${idx}`,
+                  path: path,
+                  color: getRouteColor(idx),
+                  distance: calculateRouteDistance(path), // Calculamos la distancia una sola vez
+                  vehicleId: `Camión ${idx + 1}`
+                };
+              });
+              
+              setOptimizedRoutes(routes);
+            }
+            
+            // Si hay un error de optimización
+            if (data.type === 'optimization_error') {
+              setErrorMessage(data.message);
+            }
+            
+          } catch (err) {
+            console.error("Error procesando mensaje:", err);
+            setErrorMessage(`Error procesando datos: ${err.message}`);
+          }
+        };
+
+        ws.onclose = () => {
+          console.log("Conexión WebSocket cerrada");
+          setConnectionStatus("Desconectado");
+          // Reintentar conexión después de 3 segundos
+          setTimeout(connectWebSocket, 3000);
+        };
+
+        ws.onerror = (error) => {
+          console.error("Error en WebSocket:", error);
+          setConnectionStatus("Error");
+          setErrorMessage("Error en la conexión WebSocket");
+        };
+      } catch (err) {
+        console.error("Error creando WebSocket:", err);
+        setConnectionStatus("Error");
+        setErrorMessage(`Error de conexión: ${err.message}`);
+        // Reintentar conexión después de 3 segundos
+        setTimeout(connectWebSocket, 3000);
+      }
     };
-    connect();
-    return () => wsRef.current?.close();
+
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
 
-  const getVehicleColor = id => {
-    const n = parseInt(id.replace("veh_", ""), 10);
-    const pal = [
-      [255, 0, 0], [0, 255, 0], [0, 0, 255],
-      [255, 255, 0], [255, 0, 255], [0, 255, 255]
-    ];
-    return pal[n % pal.length];
+  // Función para enviar solicitud de optimización
+  const requestOptimization = (params) => {
+    // Si params es null, solo limpiamos las rutas sin enviar petición
+    if (params === null) {
+      setOptimizedRoutes([]);
+      return;
+    }
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Limpiar rutas antiguas antes de solicitar nuevas
+      setOptimizedRoutes([]);
+      
+      wsRef.current.send(JSON.stringify({
+        type: 'optimization_request',
+        ...params
+      }));
+    } else {
+      setErrorMessage("No hay conexión con el servidor");
+    }
+  };
+  
+
+  // Función para manejar la selección de rutas
+  const handleRouteSelect = (routeId) => {
+    setSelectedRouteId(routeId === selectedRouteId ? null : routeId);
   };
 
-  // 4) Capas DeckGL: empresa, camiones, vehículos, rutas
+  // Preparar rutas con propiedad de selección
+  const routesWithSelection = optimizedRoutes.map(route => ({
+    ...route,
+    selected: route.id === selectedRouteId
+  }));
+
   const layers = [
-    // almacén
-    new ScatterplotLayer({
-      id: "company",
-      data: [1],
-      getPosition: () => [-82.3490351, 23.1298784],
-      getFillColor: [255, 87, 34],
-      getRadius: 25,
-      radiusMinPixels: 10
-    }),
-    // camiones
-    new ScatterplotLayer({
-      id: "trucks",
-      data: trucks,
-      getPosition: t => t.position,
-      getFillColor: t => t.color,
-      getRadius: 100,
-      radiusMinPixels: 8
-    }),
-    // vehículos externos
-    new ScatterplotLayer({
-      id: "vehicles",
-      data: Object.values(vehicleData),
-      getPosition: d => d.position,
-      getFillColor: d => d.color,
-      getRadius: 50,
-      radiusMinPixels: 5
-    }),
-    // rutas de vehículos
+    // Capa para rutas optimizadas
     new PathLayer({
-      id: "trails",
+      id: 'optimized-routes',
+      data: optimizedRoutes,
+      pickable: true,
+      widthScale: 1,
+      widthMinPixels: 2,
+      getPath: d => d.path,
+      getColor: d => d.id === selectedRouteId ? [255, 255, 255] : d.color,
+      getWidth: d => d.id === selectedRouteId ? 8 : 5,
+      onHover: (info) => {
+        // Actualiza el tooltip si se necesita
+      },
+      // Información que se mostrará al pasar el cursor
+      getTooltip: (obj) => {
+        if (obj.object) {
+          return {
+            html: `
+              <div>
+                <b>${obj.object.vehicleId}</b><br/>
+                Distancia: ${obj.object.distance.toFixed(2)} km<br/>
+                Puntos: ${obj.object.path.length}
+              </div>
+            `
+          };
+        }
+        return null;
+      }
+    }),
+    
+    // Capas existentes
+    new IconLayer({
+      id: "vehicle-icons",
       data: Object.values(vehicleData),
-      getPath: d => d.trail,
-      getColor: d => d.color,
-      getWidth: 3
-    })
+      getIcon: (d) => ({
+        url: "/icons/car.png",
+        width: 128,
+        height: 128,
+        anchorY: 128,
+      }),
+      getPosition: (d) => d.position,
+      getSize: 2, // escala del ícono
+      sizeScale: 10,
+      getAngle: 0,
+      getColor: 0,
+      pickable: true,
+    }),
+
+    new ScatterplotLayer({
+      id: "traffic-lights",
+      data: trafficLights,
+      getPosition: (d) => [d.lon, d.lat],
+      getFillColor: (d) => d.state === "red" ? [255, 0, 0] : [0, 255, 0],
+      getRadius: 10,
+      radiusMinPixels: 2,
+    }),
   ];
-
-  const overlay = {
-    position: "absolute", top: 10, left: 10, zIndex: 100,
-    backgroundColor: "rgba(255,255,255,0.8)", padding: 12,
-    borderRadius: 4, fontSize: "0.9rem", maxWidth: 300
-  };
-
+  
+  // Agregamos un panel para mostrar la información de las rutas
   return (
     <>
-      <div style={overlay}>
-        <h2>Almacenes San José</h2>
-        <ProductList products={products} />
-        <TruckList trucks={trucks} />
-      </div>
-
+      {/* Panel de estado extraído como componente */}
+      <StatusPanel 
+        connectionStatus={connectionStatus}
+        errorMessage={errorMessage}
+        vehicleCount={Object.keys(vehicleData).length}
+        showOptimizationForm={showOptimizationForm}
+        setShowOptimizationForm={setShowOptimizationForm}
+      />
+      
+      {/* Formulario de optimización */}
+      {showOptimizationForm && 
+        <OptimizationForm 
+          onSubmit={requestOptimization}
+          setOptimizedRoutes={setOptimizedRoutes}
+          initialValues={{
+            start_point: "",
+            target_points: [],
+            num_trucks: 3,
+            truck_capacities: [10, 10, 10],
+            target_demands: {},
+            ...(optimizationParams || {})
+          }} 
+        />
+      }
+      
+      {/* Panel mejorado para mostrar información de rutas */}
+      {optimizedRoutes.length > 0 && (
+        <>
+          <RouteInfo 
+            routes={routesWithSelection} 
+            onSelectRoute={handleRouteSelect} 
+          />
+          
+          {/* Botón para mostrar/ocultar estadísticas detalladas */}
+          <StatsButton 
+            showDetailedStats={showDetailedStats}
+            setShowDetailedStats={setShowDetailedStats}
+          />
+          
+          {/* Panel de estadísticas detalladas */}
+          <StatsModal 
+            showDetailedStats={showDetailedStats}
+            setShowDetailedStats={setShowDetailedStats}
+            optimizedRoutes={optimizedRoutes}
+          />
+        </>
+      )}
+      
       <DeckGL
         initialViewState={INITIAL_VIEW_STATE}
         controller
@@ -153,3 +302,4 @@ function App() {
 }
 
 export default App;
+
