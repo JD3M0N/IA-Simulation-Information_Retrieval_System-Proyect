@@ -1,3 +1,6 @@
 {
-    "bitoAI.codeCompletion.enableAutoCompletion": false
+    "files.associations": {
+        "numeric": "cpp",
+        "iomanip": "cpp"
+    }
 }
