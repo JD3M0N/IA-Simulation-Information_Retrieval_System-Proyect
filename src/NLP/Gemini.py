@@ -6,7 +6,7 @@ import google.generativeai as genai
 load_dotenv()
 api_key = os.getenv("API_KEY_GEMINI")
 
-class GeminiJSON:
+class Gemini:
     def __init__(self, model: str = "gemini-2.0-flash"):
         self.model = model
         genai.configure(api_key=api_key)

@@ -6,6 +6,8 @@ import os
 import networkx as nx
 from datetime import datetime
 import math
+from src.multi_agent.simulation_environment import SimulationEnvironment
+from src.multiagent.environment import Environment
 from src.vehicle import initialize_vehicles, update_vehicle_positions
 from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
 from src.optimized_route import optimize_delivery_routes
@@ -721,7 +723,10 @@ class CVRPHandler(BaseHTTPRequestHandler):
 async def main():
     # Cargar calles, inicializar vehículos y semaforos
     load_streets()
-
+    
+    #testear sim
+    sim = Environment(street_graph)
+    
     print("Servidor WebSocket iniciando en puerto 8765...")
     
     # Iniciar servidor HTTP para la IA en un hilo separado
