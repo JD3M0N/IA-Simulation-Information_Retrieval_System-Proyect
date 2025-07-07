@@ -243,6 +243,8 @@ class Environment:
         # Configurar clima inicial
         self._initialize_weather()
         
+        
+        # Imprimir estado inicial del entorno
         print(f"✅ Entorno inicializado: {len(self.road_segments)} segmentos, "
               f"{len(self.traffic_lights)} semáforos, {len(self.vehicles)} vehículos")
     
@@ -331,7 +333,6 @@ class Environment:
             self.civilian_traffic[vehicle_id] = vehicle
     
     def _initialize_weather(self):
-        """Inicializa el estado del clima"""
         # Configurar estado inicial basado en estación y ubicación
         current_month = self.current_time.month
         

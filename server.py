@@ -725,8 +725,11 @@ async def main():
     load_streets()
     
     #testear sim
+    print("==========================================================")
     sim = Environment(street_graph)
-    
+    print(sim)
+    print("Entorno de simulación creado")
+    print("==========================================================")
     print("Servidor WebSocket iniciando en puerto 8765...")
     
     # Iniciar servidor HTTP para la IA en un hilo separado
