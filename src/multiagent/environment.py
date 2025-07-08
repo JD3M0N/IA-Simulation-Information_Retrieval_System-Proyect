@@ -3,6 +3,7 @@ import os
 import time
 import random
 import asyncio
+import math
 import numpy as np
 import networkx as nx
 from typing import Dict, List, Any, Tuple, Optional, Union
@@ -10,6 +11,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from scipy import stats
 
 from src.multiagent.civilian_traffic import CivilianTrafficAgent
 from src.multiagent.Civilian_enums import *
@@ -128,16 +130,304 @@ class TrafficLight:
     priority_override: bool = False  # Para vehículos de emergencia
 
 
+class AdvancedRandomGenerator:
+    """
+    Generador de variables aleatorias usando métodos estadísticos fundamentales
+    Implementa distribuciones usando transformada inversa y otros métodos clásicos
+    """
+    
+    def __init__(self, seed: Optional[int] = None):
+        """
+        Args:
+            seed: Semilla para reproducibilidad de la simulación
+        """
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+        
+        # Cache para optimización de cálculos
+        self._normal_cache = None
+        self._has_cached_normal = False
+    
+    def uniform(self, low: float = 0.0, high: float = 1.0) -> float:
+        """
+        Distribución uniforme usando generador básico
+        """
+        return low + (high - low) * random.random()
+    
+    def exponential(self, lam: float = 1.0) -> float:
+        """
+        Distribución exponencial usando transformada inversa
+        F(x) = 1 - e^(-λx)
+        F^(-1)(u) = -ln(1-u)/λ
+        """
+        u = random.random()
+        return -math.log(1 - u) / lam
+    
+    def normal(self, mu: float = 0.0, sigma: float = 1.0) -> float:
+        """
+        Distribución normal usando método Box-Muller
+        Genera dos valores normales independientes, cachea uno
+        """
+        if self._has_cached_normal:
+            self._has_cached_normal = False
+            return self._normal_cache * sigma + mu
+        
+        # Método Box-Muller
+        u1 = random.random()
+        u2 = random.random()
+        
+        # Evitar log(0)
+        while u1 == 0:
+            u1 = random.random()
+        
+        z0 = math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2)
+        z1 = math.sqrt(-2 * math.log(u1)) * math.sin(2 * math.pi * u2)
+        
+        # Cachear z1 para la próxima llamada
+        self._normal_cache = z1
+        self._has_cached_normal = True
+        
+        return z0 * sigma + mu
+    
+    def poisson(self, lam: float) -> int:
+        """
+        Distribución de Poisson usando algoritmo de Knuth
+        Para λ grandes usa aproximación normal
+        """
+        if lam > 30:
+            # Aproximación normal para λ grandes
+            return max(0, int(self.normal(lam, math.sqrt(lam)) + 0.5))
+        
+        # Algoritmo de Knuth para λ pequeñas
+        L = math.exp(-lam)
+        k = 0
+        p = 1.0
+        
+        while p > L:
+            k += 1
+            p *= random.random()
+        
+        return k - 1
+    
+    def lognormal(self, mu: float = 0.0, sigma: float = 1.0) -> float:
+        """
+        Distribución log-normal
+        Si Y ~ Normal(μ, σ²), entonces X = e^Y ~ LogNormal(μ, σ²)
+        """
+        return math.exp(self.normal(mu, sigma))
+    
+    def gamma(self, shape: float, scale: float = 1.0) -> float:
+        """
+        Distribución Gamma usando método de Marsaglia-Tsang
+        Para shape < 1, usa transformación
+        """
+        if shape < 1:
+            # Para α < 1, usar transformación: Gamma(α) = Gamma(α+1) * U^(1/α)
+            return self.gamma(shape + 1, scale) * (random.random() ** (1.0 / shape))
+        
+        # Método de Marsaglia-Tsang para α ≥ 1
+        d = shape - 1.0/3.0
+        c = 1.0 / math.sqrt(9.0 * d)
+        
+        while True:
+            x = self.normal(0, 1)
+            v = (1.0 + c * x) ** 3
+            
+            if v > 0:
+                u = random.random()
+                if u < 1 - 0.0331 * (x ** 4):
+                    return d * v * scale
+                elif math.log(u) < 0.5 * x * x + d * (1 - v + math.log(v)):
+                    return d * v * scale
+    
+    def beta(self, alpha: float, beta_param: float) -> float:
+        """
+        Distribución Beta usando dos variables Gamma
+        Beta(α, β) = Gamma(α) / (Gamma(α) + Gamma(β))
+        """
+        x = self.gamma(alpha)
+        y = self.gamma(beta_param)
+        return x / (x + y)
+    
+    def weibull(self, shape: float, scale: float = 1.0) -> float:
+        """
+        Distribución Weibull usando transformada inversa
+        F^(-1)(u) = λ * (-ln(1-u))^(1/k)
+        """
+        u = random.random()
+        return scale * ((-math.log(1 - u)) ** (1.0 / shape))
+    
+    def triangular(self, low: float, high: float, mode: float) -> float:
+        """
+        Distribución triangular usando transformada inversa
+        """
+        u = random.random()
+        c = (mode - low) / (high - low)
+        
+        if u < c:
+            return low + math.sqrt(u * (high - low) * (mode - low))
+        else:
+            return high - math.sqrt((1 - u) * (high - low) * (high - mode))
+    
+    def binomial(self, n: int, p: float) -> int:
+        """
+        Distribución binomial
+        Para n grande usa aproximación normal
+        """
+        if n * p > 10 and n * (1 - p) > 10:
+            # Aproximación normal con corrección de continuidad
+            mu = n * p
+            sigma = math.sqrt(n * p * (1 - p))
+            return max(0, min(n, int(self.normal(mu, sigma) + 0.5)))
+        
+        # Método directo para n pequeño
+        count = 0
+        for _ in range(n):
+            if random.random() < p:
+                count += 1
+        return count
+    
+    def choice_weighted(self, choices: List, weights: List[float]):
+        """
+        Selección aleatoria con pesos usando búsqueda binaria
+        """
+        if len(choices) != len(weights):
+            raise ValueError("choices y weights deben tener la misma longitud")
+        
+        # Normalizar pesos
+        total_weight = sum(weights)
+        if total_weight == 0:
+            return random.choice(choices)
+        
+        normalized_weights = [w / total_weight for w in weights]
+        
+        # Crear distribución acumulativa
+        cumulative = []
+        cumsum = 0
+        for weight in normalized_weights:
+            cumsum += weight
+            cumulative.append(cumsum)
+        
+        # Seleccionar usando transformada inversa
+        u = random.random()
+        for i, cum_weight in enumerate(cumulative):
+            if u <= cum_weight:
+                return choices[i]
+        
+        return choices[-1]  # Fallback
+    
+    def pareto(self, scale: float, shape: float) -> float:
+        """
+        Distribución de Pareto usando transformada inversa
+        F^(-1)(u) = x_m * (1-u)^(-1/α)
+        """
+        u = random.random()
+        return scale * ((1 - u) ** (-1.0 / shape))
+
+
+# Data classes and enums
+
+@dataclass
+class WeatherState:
+    """Estado del clima"""
+    condition: WeatherCondition = WeatherCondition.CLEAR
+    temperature: float = 25.0  # Celsius
+    humidity: float = 60.0  # Porcentaje
+    wind_speed: float = 10.0  # km/h
+    precipitation: float = 0.0  # mm/h
+    visibility: float = 10.0  # km
+    pressure: float = 1013.25  # hPa
+    # uv_index: float = 5.0 
+    timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class TrafficEvent:
+    """Evento de tráfico"""
+    event_id: str
+    event_type: TrafficEventType
+    location: Tuple[float, float]  # (lat, lon)
+    affected_streets: List[str]
+    severity: int  # 1-5 (1=menor, 5=crítico)
+    start_time: datetime
+    estimated_duration: timedelta
+    description: str
+    impact_factor: float = 1.0  # Multiplicador de retraso
+    is_active: bool = True
+
+
+@dataclass
+class VehicleState:
+    """Estado de un vehículo"""
+    vehicle_id: str
+    vehicle_type: str = "delivery_truck"  # truck, van, car, motorcycle
+    current_node: int = 0
+    next_node: Optional[int] = None
+    lat: float = 0.0
+    lon: float = 0.0
+    speed: float = 0.0  # km/h
+    capacity: int = 100  # kg
+    current_load: int = 0  # kg
+    fuel_level: float = 100.0  # %
+    driver_type: str = "normal"  # normal, aggressive, cautious
+    route: List[int] = field(default_factory=list)
+    progress: float = 0.0  # Progreso en arista actual (0-1)
+    last_update: datetime = field(default_factory=datetime.now)
+    is_active: bool = True
+    emergency_priority: bool = False
+    maintenance_needed: bool = False
+
+
+@dataclass
+class RoadSegment:
+    """Segmento de carretera"""
+    edge_id: Tuple[int, int]
+    road_type: str = "residential"  # motorway, trunk, primary, secondary, tertiary, residential
+    condition: RoadCondition = RoadCondition.GOOD
+    max_speed: float = 50.0  # km/h
+    min_speed: float = 20.0  # km/h
+    capacity: int = 10  # Número máximo de vehículos simultáneos
+    current_vehicles: int = 0
+    weather_factor: float = 1.0  # Multiplicador por clima
+    traffic_factor: float = 1.0  # Multiplicador por tráfico
+    construction_factor: float = 1.0  # Multiplicador por construcción
+    slope: float = 0.0  # Pendiente en grados
+    width: float = 3.5  # Ancho en metros
+    surface_type: str = "asphalt"  # asphalt, concrete, gravel, dirt
+    lighting: bool = True
+    toll: bool = False
+    toll_cost: float = 0.0
+
+
+@dataclass
+class TrafficLight:
+    """Semáforo"""
+    node_id: int
+    state: str = "green"  # green, yellow, red
+    green_duration: float = 30.0  # segundos
+    yellow_duration: float = 5.0  # segundos
+    red_duration: float = 25.0  # segundos
+    last_change: datetime = field(default_factory=datetime.now)
+    cycle_time: float = 60.0  # segundos
+    is_adaptive: bool = False  # Se adapta al tráfico
+    priority_override: bool = False  # Para vehículos de emergencia
+
+
 class Environment:
 
-    def __init__(self, street_graph: nx.Graph, num_vehicles:int = 20):
+    def __init__(self, street_graph: nx.Graph, num_vehicles:int = 20, random_seed: Optional[int] = None):
         """
         Args:
             street_graph: Grafo de NetworkX con la red de calles
-            config: Configuración adicional del entorno
+            num_vehicles: Número de vehículos civiles
+            random_seed: Semilla para reproducibilidad de la simulación
         """
         self.street_graph = street_graph
         self.num_vehicles = num_vehicles
+        
+        # Inicializar generador avanzado de variables aleatorias
+        self.rng = AdvancedRandomGenerator(seed=random_seed)
         
         # Estados principales del entorno
         self.current_time = datetime.now()
@@ -275,24 +565,35 @@ class Environment:
             )
     
     def _initialize_traffic_lights(self):
-        """Inicializa los semáforos"""
+        """Inicializa los semáforos con distribuciones realistas"""
         
         candidates = [n for n in self.street_graph.nodes() if len(list(self.street_graph.neighbors(n))) >= 4]
-        selected = random.sample(candidates, min(1500, len(candidates)))
+        # Usar distribución de Poisson para número de semáforos basado en intersecciones
+        num_lights = min(self.rng.poisson(len(candidates) * 0.3), len(candidates))
+        selected = random.sample(candidates, num_lights)
 
         # Identificar intersecciones importantes (nodos con múltiples conexiones)
         for node in selected:
+            # Duración de verde usando distribución normal con límites
+            green_duration = max(20, min(45, self.rng.normal(30, 5)))
+            
+            # Duración de rojo correlacionada con tráfico esperado
+            red_duration = max(15, min(40, self.rng.normal(25, 4)))
+            
+            # Probabilidad de semáforo adaptativo basada en importancia del nodo
+            node_degree = len(list(self.street_graph.neighbors(node)))
+            adaptive_prob = min(0.8, node_degree / 10.0)  # Más conexiones = más probabilidad adaptativo
             
             self.traffic_lights[node] = TrafficLight(
                 node_id=node,
-                state=random.choice(["green", "red"]),
-                green_duration=random.uniform(25, 35),
-                red_duration=random.uniform(20, 30),
-                is_adaptive=random.choice([True, False])
+                state=self.rng.choice_weighted(["green", "red"], [0.6, 0.4]),
+                green_duration=green_duration,
+                red_duration=red_duration,
+                is_adaptive=self.rng.binomial(1, adaptive_prob) == 1
             )
 
     def _initialize_civilian_traffic(self):
-        """Inicializa el tráfico civil"""
+        """Inicializa el tráfico civil con distribuciones realistas"""
         num_vehicles = self.num_vehicles
         all_nodes = list(self.street_graph.nodes())
         
@@ -300,28 +601,50 @@ class Environment:
             vehicle_id = "vehicle"+ str(i)
             start_node = random.choice(all_nodes)
             node_data = self.street_graph.nodes[start_node]
-            behavior = random.choice([b for b in CivilianBehavior])
+            
+            # Comportamiento basado en distribución realista
+            behavior_weights = [0.1, 0.6, 0.15, 0.1, 0.05]  # Conservative, Normal, Aggressive, Cautious, Reckless
+            behavior = self.rng.choice_weighted(list(CivilianBehavior), behavior_weights)
+            
             v = CivilianTrafficAgent(vehicle_id=vehicle_id, initial_position=[node_data["lat"], node_data["lon"]], initial_node=start_node, behavior=behavior)
             
             # NUEVO: Dar acceso al grafo de calles para cálculos de posición
             v.street_graph = self.street_graph
             v._street_graph = self.street_graph
             
-            # Seleccionar destino aleatorio diferente al nodo inicial
-            target_node = random.choice([n for n in all_nodes if n != start_node])
+            # Seleccionar destino usando distribución de distancias realista
+            # Usar distribución gamma para distancias (cola larga = algunos viajes muy largos)
+            max_distance = min(20, len(all_nodes) // 10)
+            target_distance = int(self.rng.gamma(2, 2))  # Forma=2, escala=2
+            target_distance = min(max_distance, max(1, target_distance))
+            
+            # Encontrar nodos a la distancia objetivo
+            possible_targets = []
+            try:
+                distances = nx.single_source_shortest_path_length(self.street_graph, start_node, cutoff=target_distance+2)
+                possible_targets = [n for n, d in distances.items() if abs(d - target_distance) <= 1 and n != start_node]
+            except:
+                possible_targets = [n for n in all_nodes if n != start_node]
+            
+            if not possible_targets:
+                possible_targets = [n for n in all_nodes if n != start_node]
+            
+            target_node = random.choice(possible_targets)
             
             # Calcular ruta usando Dijkstra
             try:
                 # NetworkX ya implementa Dijkstra con shortest_path
                 route = nx.shortest_path(self.street_graph, source=start_node, target=target_node, weight='weight')
                 
-                # Asignar ruta y destino al vehículo
+                # Asignar ruta y destino al vehículo con tipos realistas
+                destination_weights = [0.35, 0.25, 0.15, 0.15, 0.1]  # trabajo, casa, compras, recreo, servicio
                 destination_types = ["work", "home", "shopping", "recreation", "service"]
-                destination_type = random.choice(destination_types)
+                destination_type = self.rng.choice_weighted(destination_types, destination_weights)
                 v.assign_route_and_destination(route, target_node, destination_type)
                 
-                # NUEVO: Inicializar velocidad para que se muevan inmediatamente
-                v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h para movimiento visible
+                # NUEVO: Velocidad inicial con distribución normal truncada
+                base_speed_factor = max(0.6, min(1.4, self.rng.normal(1.0, 0.2)))
+                v.current_speed = max(v.base_speed * base_speed_factor, 15.0)  # Al menos 15 km/h
                 v.movement_state = MovementState.MOVING  # Cambiar estado a movimiento
                 
                 print(f"   🛣️ Ruta calculada: {route[:3]}{'...' if len(route) > 3 else ''} ({len(route)} nodos)")
@@ -337,7 +660,7 @@ class Environment:
                         v.assign_route_and_destination(route, target_node, "local")
                         
                         # NUEVO: Inicializar velocidad para movimiento inmediato
-                        v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h
+                        v.current_speed = max(v.base_speed * self.rng.normal(0.9, 0.1), 15.0)
                         v.movement_state = MovementState.MOVING
                     else:
                         # Si no hay vecinos, crear ruta mínima
@@ -347,8 +670,6 @@ class Environment:
                     print(f"Error asignando ruta alternativa para {vehicle_id}: {e}")
                     route = [start_node]
                     v.assign_route_and_destination(route, start_node, "idle")
-            # print("la ruta: ")
-            # print(route)
             
             self.vehicles[vehicle_id] = v
             
@@ -372,26 +693,45 @@ class Environment:
         current_month = self.current_time.month
         
         if current_month in [6, 7, 8]:  # Verano
-            self.weather_state.temperature = random.uniform(25, 35)
-            self.weather_state.humidity = random.uniform(60, 85)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.LIGHT_RAIN, WeatherCondition.EXTREME_HEAT
-            ])
+            # Usar distribución beta para temperatura (más concentrada hacia el centro)
+            temp_beta = self.rng.beta(2, 2)  # Beta(2,2) centrada en 0.5
+            self.weather_state.temperature = 25 + temp_beta * 10  # 25-35°C
+            
+            # Humedad usando distribución triangular (más común en valores medios)
+            self.weather_state.humidity = self.rng.triangular(60, 85, 72)
+            
+            # Condiciones climáticas con pesos estacionales
+            summer_conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                               WeatherCondition.LIGHT_RAIN, WeatherCondition.EXTREME_HEAT]
+            summer_weights = [0.6, 0.25, 0.1, 0.05]
+            self.weather_state.condition = self.rng.choice_weighted(summer_conditions, summer_weights)
+            
         elif current_month in [12, 1, 2]:  # Invierno
-            self.weather_state.temperature = random.uniform(10, 25)
-            self.weather_state.humidity = random.uniform(40, 70)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.FOG, WeatherCondition.LIGHT_RAIN
-            ])
+            # Temperatura con distribución normal truncada
+            temp = max(10, min(25, self.rng.normal(17.5, 3)))
+            self.weather_state.temperature = temp
+            
+            # Humedad con distribución log-normal (sesgo hacia valores bajos)
+            humidity_raw = min(70, self.rng.lognormal(3.9, 0.3))  # ln(50) ≈ 3.9
+            self.weather_state.humidity = max(40, humidity_raw)
+            
+            winter_conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                               WeatherCondition.FOG, WeatherCondition.LIGHT_RAIN]
+            winter_weights = [0.4, 0.35, 0.15, 0.1]
+            self.weather_state.condition = self.rng.choice_weighted(winter_conditions, winter_weights)
+            
         else:  # Primavera/Otoño
-            self.weather_state.temperature = random.uniform(15, 30)
-            self.weather_state.humidity = random.uniform(50, 80)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.LIGHT_RAIN, WeatherCondition.STORM
-            ])
+            # Temperatura con distribución triangular
+            self.weather_state.temperature = self.rng.triangular(15, 30, 22)
+            
+            # Humedad con distribución gamma (forma flexible)
+            humidity_gamma = self.rng.gamma(2, 15)  # Forma=2, escala=15
+            self.weather_state.humidity = min(80, max(50, humidity_gamma))
+            
+            transitional_conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                                     WeatherCondition.LIGHT_RAIN, WeatherCondition.STORM]
+            transitional_weights = [0.45, 0.3, 0.2, 0.05]
+            self.weather_state.condition = self.rng.choice_weighted(transitional_conditions, transitional_weights)
     
     def add_delivery_truck(self, truck_id: str, start_node: int, 
                           capacity: int = 1000, **kwargs) -> bool:
@@ -488,31 +828,50 @@ class Environment:
         self._apply_weather_impact()
     
     def _generate_weather_evolution(self):
-        """Genera evolución natural del clima"""
-        # Cambios graduales en temperatura y humedad
-        temp_change = random.uniform(-2, 2)
-        humidity_change = random.uniform(-5, 5)
+        """Genera evolución natural del clima usando distribuciones realistas"""
+        # Cambios graduales en temperatura usando distribución normal centrada en 0
+        temp_change = self.rng.normal(0, 1.5)  # Cambios más suaves que uniforme
+        humidity_change = self.rng.normal(0, 3)  # Cambios graduales en humedad
         
         self.weather_state.temperature += temp_change
         self.weather_state.humidity += humidity_change
         
-        # Limitar rangos
+        # Limitar rangos usando funciones suaves
         self.weather_state.temperature = max(-10, min(50, self.weather_state.temperature))
         self.weather_state.humidity = max(0, min(100, self.weather_state.humidity))
         
-        # Posibilidad de cambio de condición
-        if random.random() < 0.1:  # 10% probabilidad
-            self.weather_state.condition = random.choice(list(WeatherCondition))
+        # Posibilidad de cambio de condición usando distribución exponencial para estabilidad
+        change_rate = self.rng.exponential(10)  # Promedio de 10 pasos antes de cambio
+        if change_rate < 1.0:  # Si el valor es bajo, cambiar condición
+            # Usar pesos basados en la estación actual
+            current_month = self.current_time.month
+            if current_month in [6, 7, 8]:  # Verano
+                conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                            WeatherCondition.LIGHT_RAIN, WeatherCondition.EXTREME_HEAT]
+                weights = [0.6, 0.25, 0.1, 0.05]
+            elif current_month in [12, 1, 2]:  # Invierno
+                conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                            WeatherCondition.FOG, WeatherCondition.LIGHT_RAIN]
+                weights = [0.4, 0.35, 0.15, 0.1]
+            else:  # Primavera/Otoño
+                conditions = [WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
+                            WeatherCondition.LIGHT_RAIN, WeatherCondition.STORM]
+                weights = [0.45, 0.3, 0.2, 0.05]
+            
+            self.weather_state.condition = self.rng.choice_weighted(conditions, weights)
         
-        # Actualizar otros parámetros
+        # Actualizar otros parámetros con distribuciones apropiadas
         if self.weather_state.condition in [WeatherCondition.LIGHT_RAIN, WeatherCondition.HEAVY_RAIN]:
-            self.weather_state.precipitation = random.uniform(1, 20)
+            # Precipitación usando distribución gamma (valores bajos más comunes)
+            self.weather_state.precipitation = self.rng.gamma(1.5, 8)  # Media ~12mm/h
         elif self.weather_state.condition == WeatherCondition.STORM:
-            self.weather_state.precipitation = random.uniform(10, 50)
-            self.weather_state.wind_speed = random.uniform(30, 80)
+            # Tormentas con distribución log-normal (eventos extremos)
+            self.weather_state.precipitation = self.rng.lognormal(3, 0.5)  # Valores altos ocasionales
+            self.weather_state.wind_speed = max(30, self.rng.weibull(2, 60))  # Weibull para vientos extremos
         else:
             self.weather_state.precipitation = 0.0
-            self.weather_state.wind_speed = random.uniform(5, 25)
+            # Viento normal con distribución gamma
+            self.weather_state.wind_speed = self.rng.gamma(2, 8)  # Vientos suaves promedio
     
     def _apply_weather_impact(self):
         """Aplica el impacto del clima a todos los segmentos"""
@@ -720,8 +1079,12 @@ class Environment:
             self.weather_generator_config["update_interval"]) < self.time_step:
             self.update_weather()
         
-        # Generar eventos de tráfico
-        if random.random() < self.traffic_generator_config["event_probability"]:
+        # Generar eventos de tráfico con distribución de eventos más realista
+        # Usar distribución de Poisson para eventos por hora
+        events_per_hour = 2.0  # Promedio de eventos por hora
+        event_probability = events_per_hour * (self.time_step / 3600.0)  # Convertir a probabilidad por step
+        
+        if self.rng.poisson(event_probability) > 0:
             self._generate_random_traffic_event()
         
         # Actualizar métricas
@@ -762,10 +1125,40 @@ class Environment:
         vehicle.lat = node_data.get('lat', 0.0)
         vehicle.lon = node_data.get('lon', 0.0)
         
-        # Asignar nuevo destino
+        # Asignar nuevo destino con distribución realista
         neighbors = list(self.street_graph.neighbors(vehicle.current_node))
         if neighbors:
-            vehicle.next_node = random.choice(neighbors)
+            # Usar distribución de Pareto para modelar preferencia por rutas principales
+            # Los vehículos tienden a preferir ciertas rutas (80/20 rule)
+            if len(neighbors) > 1:
+                # Calcular pesos basados en tipo de vía y tráfico histórico
+                weights = []
+                for neighbor in neighbors:
+                    edge_data = self.street_graph.get_edge_data(vehicle.current_node, neighbor)
+                    road_type = edge_data.get('highway', 'residential') if edge_data else 'residential'
+                    
+                    # Pesos por tipo de vía (principales más probables)
+                    type_weights = {
+                        'motorway': 5.0,
+                        'trunk': 4.0,
+                        'primary': 3.0,
+                        'secondary': 2.0,
+                        'tertiary': 1.5,
+                        'residential': 1.0,
+                        'service': 0.5
+                    }
+                    
+                    base_weight = type_weights.get(road_type, 1.0)
+                    # Añadir factor de congestión (menos peso si hay mucho tráfico)
+                    edge_id = (vehicle.current_node, neighbor)
+                    congestion_factor = 1.0 / (1.0 + self.congestion_matrix.get(edge_id, 1.0))
+                    
+                    weights.append(base_weight * congestion_factor)
+                
+                vehicle.next_node = self.rng.choice_weighted(neighbors, weights)
+            else:
+                vehicle.next_node = neighbors[0]
+                
             vehicle.progress = 0.0
             
             # Incrementar congestión en nueva arista
@@ -776,13 +1169,33 @@ class Environment:
             vehicle.next_node = None
     
     def _generate_random_traffic_event(self):
-        """Genera un evento de tráfico aleatorio"""
+        """Genera un evento de tráfico aleatorio usando distribuciones realistas"""
+        # Tipos de eventos con probabilidades realistas
         event_types = list(TrafficEventType)
-        event_type = random.choice(event_types)
+        event_weights = [0.4, 0.25, 0.15, 0.1, 0.05, 0.03, 0.02]  # Pesos según frecuencia real
         
-        # Seleccionar ubicación aleatoria
-        nodes = list(self.street_graph.nodes())
-        location_node = random.choice(nodes)
+        # Asegurar que tenemos pesos para todos los tipos
+        if len(event_weights) < len(event_types):
+            event_weights.extend([0.01] * (len(event_types) - len(event_weights)))
+        elif len(event_weights) > len(event_types):
+            event_weights = event_weights[:len(event_types)]
+        
+        event_type = self.rng.choice_weighted(event_types, event_weights)
+        
+        # Seleccionar ubicación con sesgo hacia intersecciones importantes
+        all_nodes = list(self.street_graph.nodes())
+        
+        # Calcular importancia de nodos (más conexiones = más probable)
+        node_importance = {}
+        for node in all_nodes:
+            degree = len(list(self.street_graph.neighbors(node)))
+            node_importance[node] = degree
+        
+        # Normalizar importancias y usar como pesos
+        max_importance = max(node_importance.values()) if node_importance else 1
+        node_weights = [node_importance[node] / max_importance for node in all_nodes]
+        
+        location_node = self.rng.choice_weighted(all_nodes, node_weights)
         node_data = self.street_graph.nodes[location_node]
         location = (node_data.get('lat', 0.0), node_data.get('lon', 0.0))
         
@@ -793,17 +1206,28 @@ class Environment:
             if edge_data and 'name' in edge_data:
                 affected_streets.append(edge_data['name'])
         
+        # Severidad usando distribución gamma (más eventos leves que severos)
+        severity_raw = self.rng.gamma(1.5, 1.5)  # Sesgo hacia valores bajos
+        severity = max(1, min(5, int(severity_raw + 0.5)))
+        
+        # Duración usando distribución log-normal (mayoría cortos, algunos muy largos)
+        duration_minutes = max(15, int(self.rng.lognormal(3.5, 0.8)))  # Media ~45 min
+        
+        # Factor de impacto correlacionado con severidad usando distribución exponencial
+        base_impact = 1.0 + self.rng.exponential(severity * 0.3)
+        impact_factor = min(5.0, base_impact)  # Limitar impacto máximo
+        
         # Crear evento
         event = TrafficEvent(
-            event_id=f"event_{int(time.time())}_{random.randint(1000, 9999)}",
+            event_id=f"event_{int(time.time())}_{self.rng.binomial(9999, 0.5)}",
             event_type=event_type,
             location=location,
             affected_streets=affected_streets,
-            severity=random.randint(1, 5),
+            severity=severity,
             start_time=self.current_time,
-            estimated_duration=timedelta(minutes=random.randint(15, 120)),
-            description=f"Evento de {event_type.value} en {location}",
-            impact_factor=random.uniform(1.2, 3.0)
+            estimated_duration=timedelta(minutes=duration_minutes),
+            description=f"Evento de {event_type.value} en {location} (severidad {severity})",
+            impact_factor=impact_factor
         )
         
         self.add_traffic_event(event)
@@ -1003,3 +1427,180 @@ class Environment:
             "active_traffic_violations": sum(v.traffic_violations for v in self.vehicles.values()),
             "emergency_responses": sum(v.emergency_responses for v in self.vehicles.values())
         }
+    
+    def generate_delivery_demand(self, base_demand: float = 50.0) -> int:
+        """
+        Genera demanda de paquetes usando distribución de Poisson
+        con variaciones por hora del día y día de la semana
+        
+        Args:
+            base_demand: Demanda base promedio por período
+            
+        Returns:
+            Número de paquetes a entregar
+        """
+        # Factores de ajuste temporal
+        hour = self.current_time.hour
+        weekday = self.current_time.weekday()
+        
+        # Factor por hora del día (picos en horas comerciales)
+        if 9 <= hour <= 17:  # Horas comerciales
+            hour_factor = 1.5
+        elif 18 <= hour <= 20:  # Horas pico de entrega residencial
+            hour_factor = 2.0
+        elif 7 <= hour <= 8 or 21 <= hour <= 22:  # Horas de transición
+            hour_factor = 1.2
+        else:  # Horas nocturnas
+            hour_factor = 0.3
+        
+        # Factor por día de la semana
+        if weekday < 5:  # Lunes a viernes
+            weekday_factor = 1.0
+        elif weekday == 5:  # Sábado
+            weekday_factor = 1.3
+        else:  # Domingo
+            weekday_factor = 0.7
+        
+        # Demanda ajustada
+        adjusted_demand = base_demand * hour_factor * weekday_factor
+        
+        # Generar usando Poisson
+        return self.rng.poisson(adjusted_demand)
+    
+    def generate_delivery_time(self, distance_km: float, traffic_factor: float = 1.0) -> float:
+        """
+        Genera tiempo de entrega usando distribución normal con factores de tráfico
+        
+        Args:
+            distance_km: Distancia en kilómetros
+            traffic_factor: Factor de tráfico (1.0 = normal, >1.0 = más lento)
+            
+        Returns:
+            Tiempo estimado en minutos
+        """
+        # Tiempo base: 30 km/h promedio en ciudad
+        base_time = (distance_km / 30.0) * 60.0  # minutos
+        
+        # Variabilidad usando distribución normal (±20% de variación)
+        time_variation = self.rng.normal(1.0, 0.2)
+        time_variation = max(0.5, min(2.0, time_variation))  # Limitar variación
+        
+        # Aplicar factores
+        total_time = base_time * time_variation * traffic_factor
+        
+        # Añadir retrasos ocasionales usando distribución exponencial
+        if self.rng.binomial(1, 0.15):  # 15% probabilidad de retraso
+            delay = self.rng.exponential(10)  # Retraso promedio de 10 min
+            total_time += delay
+        
+        return max(5.0, total_time)  # Mínimo 5 minutos
+    
+    def generate_vehicle_failure_probability(self, vehicle_age_years: float = 3.0, 
+                                           maintenance_score: float = 0.8) -> bool:
+        """
+        Genera probabilidad de fallo de vehículo usando distribución Weibull
+        
+        Args:
+            vehicle_age_years: Edad del vehículo en años
+            maintenance_score: Puntaje de mantenimiento (0-1, 1=perfecto)
+            
+        Returns:
+            True si el vehículo falla
+        """
+        # Parámetros Weibull para modelar fallos
+        shape = 1.5  # Factor de forma (>1 indica mayor probabilidad con edad)
+        scale = 10.0 / vehicle_age_years  # Factor de escala ajustado por edad
+        
+        # Tiempo hasta fallo (en años)
+        time_to_failure = self.rng.weibull(shape, scale)
+        
+        # Ajustar por mantenimiento
+        time_to_failure *= maintenance_score
+        
+        # Convertir a probabilidad por día
+        daily_failure_prob = 1.0 / (time_to_failure * 365.25)
+        
+        # Generar fallo
+        return self.rng.binomial(1, min(0.1, daily_failure_prob)) == 1
+    
+    def generate_fuel_consumption(self, distance_km: float, vehicle_type: str = "truck",
+                                weather_condition: Optional[WeatherCondition] = None) -> float:
+        """
+        Genera consumo de combustible usando distribución gamma
+        
+        Args:
+            distance_km: Distancia recorrida
+            vehicle_type: Tipo de vehículo
+            weather_condition: Condición climática
+            
+        Returns:
+            Litros de combustible consumidos
+        """
+        # Consumo base por tipo de vehículo (litros/100km)
+        base_consumption = {
+            "truck": 25.0,
+            "van": 15.0,
+            "car": 8.0,
+            "motorcycle": 4.0
+        }
+        
+        base_rate = base_consumption.get(vehicle_type, 15.0)
+        
+        # Factor climático
+        weather_factor = 1.0
+        if weather_condition:
+            weather_factors = {
+                WeatherCondition.CLEAR: 1.0,
+                WeatherCondition.LIGHT_RAIN: 1.1,
+                WeatherCondition.HEAVY_RAIN: 1.25,
+                WeatherCondition.STORM: 1.4,
+                WeatherCondition.FOG: 1.15,
+                WeatherCondition.EXTREME_HEAT: 1.2,
+                WeatherCondition.SNOW: 1.5
+            }
+            weather_factor = weather_factors.get(weather_condition, 1.0)
+        
+        # Variabilidad usando distribución gamma (sesgo hacia valores bajos)
+        consumption_variation = self.rng.gamma(2, 0.4)  # Media ~0.8, sesgo hacia eficiencia
+        
+        # Calcular consumo total
+        consumption_per_100km = base_rate * weather_factor * consumption_variation
+        total_consumption = (distance_km / 100.0) * consumption_per_100km
+        
+        return max(0.1, total_consumption)
+    
+    def simulate_traffic_congestion_factor(self, hour: int, road_type: str = "residential") -> float:
+        """
+        Simula factor de congestión usando distribuciones apropiadas
+        
+        Args:
+            hour: Hora del día (0-23)
+            road_type: Tipo de vía
+            
+        Returns:
+            Factor de congestión (1.0 = normal, >1.0 = congestionado)
+        """
+        # Factores base por hora usando distribución beta para curvas realistas
+        if 7 <= hour <= 9 or 17 <= hour <= 19:  # Horas pico
+            # Beta(2,5) da una distribución sesgada hacia valores altos
+            peak_factor = 1.0 + self.rng.beta(2, 5) * 3.0  # 1.0 a 4.0
+        elif 10 <= hour <= 16:  # Horas normales
+            # Beta(5,2) da una distribución sesgada hacia valores medios
+            peak_factor = 1.0 + self.rng.beta(5, 2) * 1.5  # 1.0 a 2.5
+        elif 20 <= hour <= 22:  # Noche temprana
+            peak_factor = 1.0 + self.rng.beta(3, 7) * 1.0  # 1.0 a 2.0
+        else:  # Madrugada
+            peak_factor = 1.0 + self.rng.beta(8, 2) * 0.3  # 1.0 a 1.3
+        
+        # Ajustar por tipo de vía
+        road_factors = {
+            "motorway": 0.8,    # Menos congestión relativa
+            "primary": 1.0,     # Congestión normal
+            "secondary": 1.1,   # Algo más de congestión
+            "residential": 1.2,  # Más congestión local
+            "service": 0.9      # Menos tráfico
+        }
+        
+        road_factor = road_factors.get(road_type, 1.0)
+        
+        return peak_factor * road_factor
