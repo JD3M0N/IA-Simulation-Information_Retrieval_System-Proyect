@@ -770,8 +770,8 @@ class CivilianTrafficAgent(BaseAgent):
         if not self.route or self.next_node is None:
             return
         
-        # Calcular progreso en la arista actual
-        movement_factor = self.current_speed * 0.01  # Factor de conversión
+        # Calcular progreso en la arista actual con factor más alto para movimiento visible
+        movement_factor = self.current_speed * 0.05  # Aumentado de 0.01 a 0.05 para movimiento más rápido
         self.progress += movement_factor
         
         # Verificar si llegó al siguiente nodo
@@ -811,12 +811,52 @@ class CivilianTrafficAgent(BaseAgent):
                 await self._request_route_change("Route error")
     
     def _update_interpolated_position(self):
-        """Actualiza la posición interpolada entre nodos"""
-        # Implementación simplificada - en práctica usaría coordenadas reales de los nodos
-        if self.progress > 0:
-            # Pequeña variación para simular movimiento
-            variation = random.uniform(-0.0001, 0.0001)
-            self.position = (self.position[0] + variation, self.position[1] + variation)
+        """Actualiza la posición interpolada entre nodos usando coordenadas reales"""
+        if self.next_node is None or self.progress <= 0:
+            return
+        
+        try:
+            # Obtener las coordenadas de los nodos desde el grafo del entorno
+            # Necesitamos acceso al grafo, lo obtenemos del environment_state
+            # Por ahora usamos las coordenadas almacenadas en el agente
+            
+            if hasattr(self, '_street_graph') and self._street_graph:
+                # Obtener coordenadas reales de los nodos
+                current_node_data = self._street_graph.nodes[self.current_node]
+                next_node_data = self._street_graph.nodes[self.next_node]
+                
+                current_lat = current_node_data.get('lat', self.lat)
+                current_lon = current_node_data.get('lon', self.lon)
+                next_lat = next_node_data.get('lat', self.lat)
+                next_lon = next_node_data.get('lon', self.lon)
+                
+                # Interpolación lineal entre nodos
+                interpolated_lat = current_lat + (next_lat - current_lat) * self.progress
+                interpolated_lon = current_lon + (next_lon - current_lon) * self.progress
+                
+                # Actualizar posición
+                self.lat = interpolated_lat
+                self.lon = interpolated_lon
+                self.position = (self.lat, self.lon)
+                self.update_position(self.position)
+            else:
+                # Fallback: movimiento simulado con pequeñas variaciones
+                direction = random.uniform(0, 2 * 3.14159)  # Dirección aleatoria
+                distance = self.current_speed * 0.00001  # Distancia basada en velocidad
+                
+                self.lat += distance * np.cos(direction)
+                self.lon += distance * np.sin(direction)
+                self.position = (self.lat, self.lon)
+                self.update_position(self.position)
+                
+        except Exception as e:
+            # Si hay error, hacer movimiento simulado básico
+            direction = random.uniform(0, 2 * 3.14159)
+            distance = self.current_speed * 0.00001
+            
+            self.lat += distance * np.cos(direction)
+            self.lon += distance * np.sin(direction)
+            self.position = (self.lat, self.lon)
             self.update_position(self.position)
     
     def _consume_fuel(self):

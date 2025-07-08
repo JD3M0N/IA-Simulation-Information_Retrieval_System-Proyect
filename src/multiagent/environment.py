@@ -293,6 +293,9 @@ class Environment:
             behavior = random.choice([b for b in CivilianBehavior])
             v = CivilianTrafficAgent(vehicle_id=vehicle_id, initial_position=[node_data["lat"], node_data["lon"]], initial_node=start_node, behavior=behavior)
             
+            # NUEVO: Dar acceso al grafo de calles para cálculos de posición
+            v._street_graph = self.street_graph
+            
             # Seleccionar destino aleatorio diferente al nodo inicial
             target_node = random.choice([n for n in all_nodes if n != start_node])
             
@@ -894,3 +897,53 @@ class Environment:
                 f"traffic_lights={len(self.traffic_lights)}, "
                 f"active_events={len(self.active_events)}, "
                 f"weather={self.weather_state.condition.value})")
+    
+    def get_vehicle_positions(self) -> List[Dict[str, Any]]:
+        """
+        Obtiene las posiciones actuales de todos los vehículos para la interfaz visual
+        
+        Returns:
+            Lista de diccionarios con información de posición de cada vehículo
+        """
+        vehicle_positions = []
+        
+        for vehicle_id, vehicle in self.vehicles.items():
+            position_data = {
+                "id": vehicle_id,
+                "lat": vehicle.lat,
+                "lon": vehicle.lon,
+                "speed": vehicle.current_speed,
+                "behavior": vehicle.behavior.value if hasattr(vehicle.behavior, 'value') else str(vehicle.behavior),
+                "state": vehicle.movement_state.value if hasattr(vehicle.movement_state, 'value') else str(vehicle.movement_state),
+                "type": vehicle.vehicle_type.value if hasattr(vehicle.vehicle_type, 'value') else str(vehicle.vehicle_type),
+                "current_node": vehicle.current_node,
+                "next_node": vehicle.next_node,
+                "progress": vehicle.progress,
+                "fuel_level": vehicle.fuel_level,
+                "has_destination": vehicle.has_destination,
+                "target_node": vehicle.target_node
+            }
+            vehicle_positions.append(position_data)
+        
+        return vehicle_positions
+    
+    def get_simulation_status(self) -> Dict[str, Any]:
+        """
+        Obtiene el estado general de la simulación
+        
+        Returns:
+            Diccionario con información del estado de la simulación
+        """
+        return {
+            "is_running": True,  # Asumimos que está corriendo si estamos obteniendo el estado
+            "simulation_time": (self.current_time - self.simulation_start_time).total_seconds(),
+            "total_vehicles": len(self.vehicles),
+            "total_delivery_trucks": len(self.delivery_trucks),
+            "total_road_segments": len(self.road_segments),
+            "total_traffic_lights": len(self.traffic_lights),
+            "active_events": len(self.active_events),
+            "weather_condition": self.weather_state.condition.value if hasattr(self.weather_state.condition, 'value') else str(self.weather_state.condition),
+            "average_speed": sum(v.current_speed for v in self.vehicles.values()) / len(self.vehicles) if self.vehicles else 0,
+            "active_traffic_violations": sum(v.traffic_violations for v in self.vehicles.values()),
+            "emergency_responses": sum(v.emergency_responses for v in self.vehicles.values())
+        }

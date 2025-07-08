@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { DeckGL } from "deck.gl";
 import { Map } from "react-map-gl/maplibre";
-import { ScatterplotLayer, IconLayer } from "@deck.gl/layers";
+import { ScatterplotLayer, IconLayer, PathLayer } from "@deck.gl/layers";
 import OptimizationForm from "./components/OptimizationForm";
 import StatusPanel from "./components/StatusPanel";
 import StatsModal from "./components/StatsModal";
@@ -54,6 +54,8 @@ function App() {
   const [tooltipPosition, setTooltipPosition] = useState(null);
   const [showRAGPanel, setShowRAGPanel] = useState(false);
   const [optimizationWarnings, setOptimizationWarnings] = useState([]);
+  const [simulationStatus, setSimulationStatus] = useState(null); // NUEVO: Estado de simulación
+  const [hoveredVehicle, setHoveredVehicle] = useState(null); // NUEVO: Vehículo en hover
 
   const trailsRef = useRef({});
   const wsRef = useRef(null);
@@ -144,13 +146,29 @@ function App() {
                 updated[v.id] = {
                   id: v.id,
                   position: [v.lon, v.lat],
+                  lat: v.lat,
+                  lon: v.lon,
                   trail: newTrail,
-                  color: 0,
+                  speed: v.speed || 0,
+                  behavior: v.behavior || 'normal',
+                  state: v.state || 'idle',
+                  type: v.type || 'vehicle',
+                  current_node: v.current_node,
+                  next_node: v.next_node,
+                  progress: v.progress || 0,
+                  fuel_level: v.fuel_level || 100,
+                  has_destination: v.has_destination || false,
+                  target_node: v.target_node
                 };
               });
 
               setVehicleData(updated);
               setTrafficLights(data.traffic_lights || []);
+
+              // Actualizar estado de la simulación si está disponible
+              if (data.multi_agent_status) {
+                setSimulationStatus(data.multi_agent_status);
+              }
             }
             // Si es un error de optimización
             if (data.type === 'optimization_error') {
@@ -316,6 +334,31 @@ function App() {
       onRouteHover: handleRouteHover
     }),
 
+    // NUEVO: Capa de rastros de vehículos
+    new PathLayer({
+      id: 'vehicle-trails',
+      data: Object.values(vehicleData).filter(v => v.trail && v.trail.length > 1),
+      pickable: false,
+      widthScale: 2,
+      widthMinPixels: 1,
+      getPath: d => d.trail,
+      getColor: d => {
+        const behavior = d.behavior || 'normal';
+        switch (behavior.toLowerCase()) {
+          case 'agresivo':
+          case 'temerario':
+            return [255, 0, 0, 100]; // Rojo transparente
+          case 'cauteloso':
+          case 'conservador':
+            return [0, 255, 0, 100]; // Verde transparente
+          case 'normal':
+          default:
+            return [0, 150, 255, 100]; // Azul transparente
+        }
+      },
+      getWidth: d => Math.max(1, (d.speed || 0) * 0.1)
+    }),
+
     // Capa para nodos seleccionados
     new ScatterplotLayer({
       id: 'selected-nodes',
@@ -336,21 +379,49 @@ function App() {
     }),
 
     // Capas existentes de vehículos y semáforos
-    new IconLayer({
-      id: "vehicle-icons",
+    new ScatterplotLayer({
+      id: "vehicle-points",
       data: Object.values(vehicleData),
-      getIcon: (d) => ({
-        url: "/icons/car.png",
-        width: 128,
-        height: 128,
-        anchorY: 128,
-      }),
-      getPosition: (d) => d.position,
-      getSize: 2,
-      sizeScale: 10,
-      getAngle: 0,
-      getColor: 0,
       pickable: true,
+      stroked: true,
+      filled: true,
+      radiusScale: 1,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 8,
+      getPosition: (d) => d.position || [d.lon, d.lat],
+      getRadius: (d) => {
+        // Tamaño basado en la velocidad del vehículo
+        const speed = d.speed || 0;
+        return Math.max(4, Math.min(8, speed * 0.5 + 4));
+      },
+      getFillColor: (d) => {
+        // Color basado en el tipo de comportamiento del vehículo
+        const behavior = d.behavior || 'normal';
+        switch (behavior.toLowerCase()) {
+          case 'agresivo':
+          case 'temerario':
+            return [255, 0, 0, 200]; // Rojo para agresivo
+          case 'cauteloso':
+          case 'conservador':
+            return [0, 255, 0, 200]; // Verde para cauteloso
+          case 'normal':
+          default:
+            return [0, 150, 255, 200]; // Azul para normal
+        }
+      },
+      getLineColor: [255, 255, 255, 255],
+      getLineWidth: 1,
+      onHover: (info) => {
+        if (info.object) {
+          setHoveredVehicle({
+            ...info.object,
+            x: info.x,
+            y: info.y
+          });
+        } else {
+          setHoveredVehicle(null);
+        }
+      }
     }),
 
     new ScatterplotLayer({
@@ -398,6 +469,34 @@ function App() {
         setShowRAGPanel={setShowRAGPanel}
         optimizationWarnings={optimizationWarnings} // NUEVO
       />
+
+      {/* NUEVO: Panel de estadísticas de simulación en tiempo real */}
+      {simulationStatus && (
+        <div className="simulation-stats-panel" style={{
+          position: 'absolute',
+          top: '120px',
+          right: '10px',
+          background: 'rgba(0, 0, 0, 0.8)',
+          color: 'white',
+          padding: '10px',
+          borderRadius: '8px',
+          fontSize: '12px',
+          minWidth: '200px',
+          zIndex: 1000
+        }}>
+          <h4 style={{ margin: '0 0 8px 0', color: '#00ff00' }}>🚗 Simulación en Tiempo Real</h4>
+          <div>⏱️ Tiempo: {Math.round(simulationStatus.simulation_time || 0)}s</div>
+          <div>🚙 Vehículos: {simulationStatus.total_vehicles || 0}</div>
+          <div>🚚 Camiones: {simulationStatus.total_delivery_trucks || 0}</div>
+          <div>🛣️ Calles: {simulationStatus.total_road_segments || 0}</div>
+          <div>🚦 Semáforos: {simulationStatus.total_traffic_lights || 0}</div>
+          <div>⚡ Eventos: {simulationStatus.active_events || 0}</div>
+          <div>🌤️ Clima: {simulationStatus.weather_condition || 'N/A'}</div>
+          <div>⚡ Velocidad Promedio: {Math.round(simulationStatus.average_speed || 0)} km/h</div>
+          <div>⚠️ Violaciones: {simulationStatus.active_traffic_violations || 0}</div>
+          <div>🚨 Emergencias: {simulationStatus.emergency_responses || 0}</div>
+        </div>
+      )}
       {/* Mensaje especial cuando recibimos 403 */}
       {errorMessage.includes('status: 403') && (
         <div className="vpn-warning">
@@ -460,6 +559,33 @@ function App() {
         hoveredRoute={hoveredRoute}
         position={tooltipPosition}
       />
+
+      {/* NUEVO: Tooltip de vehículo */}
+      {hoveredVehicle && (
+        <div style={{
+          position: 'absolute',
+          left: hoveredVehicle.x + 10,
+          top: hoveredVehicle.y - 10,
+          background: 'rgba(0, 0, 0, 0.9)',
+          color: 'white',
+          padding: '8px',
+          borderRadius: '4px',
+          fontSize: '12px',
+          pointerEvents: 'none',
+          zIndex: 1000,
+          maxWidth: '200px'
+        }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>🚗 {hoveredVehicle.id}</div>
+          <div>⚡ Velocidad: {Math.round(hoveredVehicle.speed || 0)} km/h</div>
+          <div>🎯 Comportamiento: {hoveredVehicle.behavior || 'normal'}</div>
+          <div>📍 Estado: {hoveredVehicle.state || 'idle'}</div>
+          <div>🚗 Tipo: {hoveredVehicle.type || 'vehicle'}</div>
+          <div>⛽ Combustible: {Math.round(hoveredVehicle.fuel_level || 0)}%</div>
+          {hoveredVehicle.has_destination && (
+            <div>🎯 Destino: Nodo {hoveredVehicle.target_node}</div>
+          )}
+        </div>
+      )}
 
       {/* Mapa principal */}
       <DeckGL

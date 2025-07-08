@@ -246,30 +246,30 @@ async def send_positions(websocket):
     """Envía las posiciones actualizadas de los vehículos al cliente"""
     while True:
         try:
-            # Obtener datos del sistema multi-agente si está disponible
+            # Obtener datos del entorno de simulación
             vehicle_data = []
             multi_agent_status = {}
             
-            if multi_agent_environment:
-                # Obtener posiciones de vehículos del sistema multi-agente
-                vehicle_positions = multi_agent_environment.get_vehicle_positions()
-                vehicle_data = [
-                    {
-                        "id": vehicle["id"], 
-                        "lat": vehicle["lat"], 
-                        "lon": vehicle["lon"],
-                        "behavior": vehicle.get("behavior", "normal"),
-                        "state": vehicle.get("state", "idle"),
-                        "speed": vehicle.get("speed", 0.0)
-                    }
-                    for vehicle in vehicle_positions
-                ]
-                
-                # Obtener estado de la simulación
-                multi_agent_status = multi_agent_environment.get_simulation_status()
+            # Priorizar el entorno de simulación del multiagente original
+            if simulation_environment:
+                try:
+                    vehicle_positions = simulation_environment.get_vehicle_positions()
+                    vehicle_data = vehicle_positions
+                    multi_agent_status = simulation_environment.get_simulation_status()
+                except Exception as e:
+                    print(f"Error obteniendo datos de simulación: {e}")
+            
+            # Fallback al sistema multi-agente si está disponible
+            elif multi_agent_environment:
+                try:
+                    vehicle_positions = multi_agent_environment.get_vehicle_positions()
+                    vehicle_data = vehicle_positions
+                    multi_agent_status = multi_agent_environment.get_simulation_status()
+                except Exception as e:
+                    print(f"Error obteniendo datos del multi-agente: {e}")
             
             # Mantener compatibilidad con sistema original
-            if not vehicle_data and vehicles:
+            elif vehicles:
                 vehicle_data = [
                     {"id": vid, "lat": v["lat"], "lon": v["lon"]}
                     for vid, v in vehicles.items()
@@ -293,7 +293,7 @@ async def send_positions(websocket):
             }
             
             await websocket.send(json.dumps(payload))
-            await asyncio.sleep(0.2)  # Actualización más frecuente
+            await asyncio.sleep(0.1)  # Actualización aún más frecuente para movimiento fluido (10 FPS)
         except websockets.exceptions.ConnectionClosed:
             print("Cliente desconectado")
             break
@@ -722,26 +722,56 @@ class CVRPHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
+# Variable global para el entorno de simulación del multiagente original
+simulation_environment = None
+
+# Función para ejecutar la simulación en background
+async def run_simulation():
+    """Ejecuta la simulación continuamente en background"""
+    global simulation_environment
+    
+    if simulation_environment is None:
+        return
+    
+    print("🚗 Iniciando simulación de vehículos en background...")
+    step_count = 0
+    
+    while True:
+        try:
+            await simulation_environment.step()
+            step_count += 1
+            
+            # Log cada 50 pasos para no saturar la consola
+            if step_count % 50 == 0:
+                print(f"📊 Simulación: {step_count} pasos completados")
+            
+            # Pausa entre pasos para controlar la velocidad de simulación
+            await asyncio.sleep(0.05)  # Reducido de 0.1 a 0.05 para movimiento más fluido (20 FPS)
+            
+        except Exception as e:
+            print(f"❌ Error en simulación: {e}")
+            await asyncio.sleep(1)
+
 # Modificar la función main para incluir el servidor HTTP
 async def main():
+    global simulation_environment
+    
     # Cargar calles, inicializar vehículos y semaforos
     load_streets()
     
-    #testear sim
+    # Crear entorno de simulación
     print("==========================================================")
-    sim = Environment(street_graph)
-    print(sim)
+    simulation_environment = Environment(street_graph)
+    print(simulation_environment)
     print("Entorno de simulación creado")
     print("==========================================================")
     
-    for i in range(10):
-        print(f"epoca{i}^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-        await sim.step()
-    
-    
-    
-    
-    
+    # Ejecutar algunos pasos iniciales para verificar que funciona
+    print("🔄 Ejecutando pasos iniciales de simulación...")
+    for i in range(5):
+        print(f"Paso inicial {i+1}/5")
+        await simulation_environment.step()
+    print("✅ Pasos iniciales completados")
     
     print("Servidor WebSocket iniciando en puerto 8765...")
     
@@ -760,6 +790,10 @@ async def main():
     
     # Dar tiempo para que el servidor HTTP se inicie
     await asyncio.sleep(1)
+    
+    # Iniciar la simulación en background
+    print("🚗 Iniciando simulación de vehículos en background...")
+    simulation_task = asyncio.create_task(run_simulation())
     
     # Iniciar servidor WebSocket
     print("✅ Servidor WebSocket iniciado correctamente en puerto 8765")
