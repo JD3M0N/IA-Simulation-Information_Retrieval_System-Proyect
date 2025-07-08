@@ -183,6 +183,12 @@ class CommunicationManager:
         self.stats["total_messages"] += 1
         self.stats["messages_by_type"][message.message_type.value] += 1
         
+        # Check if sender is registered
+        if sender_id not in self.agents:
+            self.stats["failed_deliveries"] += 1
+            self.logger.error(f"Agente emisor no encontrado: {sender_id}")
+            return
+        
         # Mensaje broadcast
         if message.receiver_id == "ALL" or message.receiver_id == "*":
             await self._broadcast_message(sender_id, message)

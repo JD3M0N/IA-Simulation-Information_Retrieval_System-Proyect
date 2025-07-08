@@ -8,34 +8,55 @@ import os
 import random
 import asyncio
 import numpy as np
+import math
+import logging
+import networkx as nx
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
 from src.multiagent.Civilian_enums import *
 
-# Importar clases base del sistema multi-agente
-sys.path.append("src/multi_agent")
-from base_agent import BaseAgent, MessageType, AgentState
-from communication import communication_manager
+# Importar clases base del sistema multi-agente - SIMPLIFIED
+# Communication manager disabled for standalone operation
+from enum import Enum
 
 # Importar environment para interactuar con el estado del entorno
 sys.path.append("src/multiagent")
 # from environment import WeatherCondition, RoadCondition
 from src.multiagent.Environment_enums import *
 
-class CivilianTrafficAgent(BaseAgent):
+class CivilianTrafficAgent:
     """
     Agente que simula el comportamiento de vehículos civiles
-    Interactúa con el environment y otros agentes del sistema
+    Versión standalone sin dependencias de comunicación
     """
     
     def __init__(self, vehicle_id: str, initial_position: Tuple[float, float],
                  initial_node: int, behavior: CivilianBehavior = CivilianBehavior.NORMAL):
-        super().__init__(vehicle_id, "civilian_traffic", initial_position)
+        # Initialize agent properties
+        self.agent_id = vehicle_id
+        self.agent_type = "civilian_traffic"
+        self.position = initial_position
+        self.state = "active"  # Simple state instead of AgentState enum
+        
+        # Add logger for compatibility
+        import logging
+        self.logger = logging.getLogger(f"CivilianAgent_{vehicle_id}")
+        
+        # Add missing attributes for compatibility
+        self.metrics = {
+            "distance_traveled": 0.0,
+            "total_travel_time": 0.0,
+            "stops_count": 0
+        }
         
         self.lat = initial_position[0]
         self.lon = initial_position[1]
+        
+        # Inicialización para seguimiento de movimiento
+        self._last_position = initial_position
+        self._movement_direction = random.uniform(0, 2 * 3.14159)  # Dirección inicial aleatoria
         
         # Características del vehículo civil
         self.behavior = behavior
@@ -79,6 +100,10 @@ class CivilianTrafficAgent(BaseAgent):
         self.risk_tolerance = self._calculate_risk_tolerance()
         self.patience_level = self._calculate_patience_level()
         
+        # Sistema de rastros para visualización
+        self.trail = []
+        self.max_trail_length = 20
+        
         # Métricas específicas
         self.distance_traveled = 0.0
         self.total_travel_time = 0.0
@@ -94,6 +119,20 @@ class CivilianTrafficAgent(BaseAgent):
         self.arrival_time = None
         self.trip_purpose = None
         
+    def get_distance_to(self, position: Tuple[float, float]) -> float:
+        """Calcula distancia euclidiana a una posición"""
+        import math
+        lat1, lon1 = self.lat, self.lon
+        lat2, lon2 = position
+        
+        # Usar fórmula de Haversine para distancia más precisa
+        R = 6371.0  # Radio de la Tierra en km
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        return R * c
+    
     def _calculate_base_speed(self) -> float:
         """Calcula velocidad base según comportamiento"""
         speed_map = {
@@ -148,6 +187,66 @@ class CivilianTrafficAgent(BaseAgent):
             CivilianBehavior.RECKLESS: random.uniform(5.0, 7.0)
         }
         return decel_map[self.behavior]
+    
+    async def _assign_random_destination(self):
+        """Asigna un destino aleatorio al vehículo"""
+        if hasattr(self, 'street_graph') and self.street_graph and len(list(self.street_graph.nodes)) > 0:
+            # Obtener nodos disponibles
+            available_nodes = list(self.street_graph.nodes)
+            
+            # Filtrar nodo actual si es posible
+            if self.current_node in available_nodes and len(available_nodes) > 1:
+                available_nodes.remove(self.current_node)
+            
+            # Seleccionar destino aleatorio
+            if available_nodes:
+                self.target_node = random.choice(available_nodes)
+                self.has_destination = True
+                
+                # Intentar calcular ruta
+                try:
+                    if self.current_node != self.target_node:
+                        path = self._find_path(self.current_node, self.target_node)
+                        if path and len(path) > 1:
+                            self.route = path[1:]  # Excluir nodo actual
+                            self.next_node = self.route[0] if self.route else None
+                            self.movement_state = MovementState.MOVING
+                        else:
+                            # Si no se puede calcular ruta, movimiento aleatorio
+                            self._setup_random_movement()
+                    else:
+                        # Si está en el destino, buscar nuevo destino
+                        self._setup_random_movement()
+                except Exception as e:
+                    # Fallback a movimiento aleatorio
+                    self._setup_random_movement()
+            else:
+                self._setup_random_movement()
+        else:
+            # Si no hay grafo disponible, movimiento aleatorio
+            self._setup_random_movement()
+    
+    def _setup_random_movement(self):
+        """Configura movimiento aleatorio cuando no se puede calcular ruta"""
+        self.has_destination = False
+        self.target_node = None
+        self.route = []
+        self.next_node = None
+        self.movement_state = MovementState.MOVING
+        # El movimiento será manejado en _move_vehicle() con coordenadas directas
+    
+    def _find_path(self, start_node, target_node):
+        """Encuentra la ruta más corta entre dos nodos"""
+        try:
+            import networkx as nx
+            if hasattr(self, 'street_graph') and self.street_graph:
+                return nx.shortest_path(self.street_graph, source=start_node, target=target_node, weight='weight')
+            elif hasattr(self, '_street_graph') and self._street_graph:
+                return nx.shortest_path(self._street_graph, source=start_node, target=target_node, weight='weight')
+            else:
+                return None
+        except Exception as e:
+            return None
     
     def _calculate_fuel_consumption(self) -> float:
         """Calcula tasa de consumo de combustible"""
@@ -609,7 +708,7 @@ class CivilianTrafficAgent(BaseAgent):
         decision = {"continue_route": True, "request_new_destination": False}
         
         # Verificar si necesita nuevo destino
-        if not self.has_destination or not self.route:
+        if not self.has_destination or not self.route or self.next_node is None:
             decision["request_new_destination"] = True
             decision["continue_route"] = False
         
@@ -617,6 +716,11 @@ class CivilianTrafficAgent(BaseAgent):
         if self.current_node == self.target_node:
             decision["continue_route"] = False
             decision["destination_reached"] = True
+            decision["request_new_destination"] = True
+        
+        # Asegurar velocidad mínima si tiene destino
+        if self.has_destination and self.current_speed < 5.0:
+            self.current_speed = max(self.base_speed * 0.5, 5.0)
         
         return decision
     
@@ -635,6 +739,8 @@ class CivilianTrafficAgent(BaseAgent):
         Ejecuta las acciones determinadas por las decisiones
         """
         try:
+            old_position = (self.lat, self.lon)
+            
             # Actualizar velocidad
             target_speed = decision.get("target_speed", self.current_speed)
             await self._update_speed(target_speed)
@@ -657,6 +763,15 @@ class CivilianTrafficAgent(BaseAgent):
             # Mover el vehículo si está en movimiento
             if self.movement_state == MovementState.MOVING and self.current_speed > 0:
                 await self._move_vehicle()
+                
+                # Debug específico para el primer vehículo
+                if self.agent_id == 'vehicle0':
+                    new_position = (self.lat, self.lon)
+                    position_changed = abs(old_position[0] - new_position[0]) > 0.000001 or abs(old_position[1] - new_position[1]) > 0.000001
+                    if position_changed:
+                        print(f"🏃‍♂️ {self.agent_id}: MOVIDO de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({new_position[0]:.6f}, {new_position[1]:.6f})")
+                        print(f"   Estado: {self.movement_state.value}, velocidad: {self.current_speed:.1f} km/h, progreso: {self.progress:.3f}")
+                        print(f"   Ruta: {self.current_node} -> {self.next_node}, destino: {self.target_node}")
             
             # Comunicar estado si hay cambios significativos
             if decision.get("signal_intentions", True):
@@ -693,73 +808,33 @@ class CivilianTrafficAgent(BaseAgent):
     
     async def _request_route_change(self, reason: str):
         """Solicita cambio de ruta al sistema"""
-        await communication_manager.send_to_topic(
-            "route_requests",
-            self.agent_id,
-            MessageType.REQUEST,
-            {
-                "request_type": "route_change",
-                "current_node": self.current_node,
-                "target_node": self.target_node,
-                "reason": reason,
-                "vehicle_type": self.vehicle_type,
-                "behavior": self.behavior.value,
-                "urgency": "medium"
-            }
-        )
-        
+        # Communication manager disabled - route change request skipped
+        print(f"🔄 Vehicle {self.agent_id} would request route change: {reason}")
         self.route_changes += 1
     
     async def _request_new_destination(self):
         """Solicita un nuevo destino para el vehículo"""
-        destination_types = ["work", "home", "shopping", "recreation", "service"]
-        destination_type = random.choice(destination_types)
+        # Usar asignación directa en lugar de comunicación (más eficiente)
+        await self._assign_random_destination()
         
-        await communication_manager.send_to_topic(
-            "destination_requests",
-            self.agent_id,
-            MessageType.REQUEST,
-            {
-                "request_type": "new_destination",
-                "current_node": self.current_node,
-                "destination_type": destination_type,
-                "vehicle_type": self.vehicle_type,
-                "departure_time": datetime.now().isoformat()
-            }
-        )
+        # Communication manager disabled - destination notification skipped
+        print(f"🎯 Vehicle {self.agent_id} assigned new destination: node {self.target_node}")
     
     async def _execute_emergency_stop(self):
         """Ejecuta parada de emergencia"""
         self.current_speed = 0.0
         self.movement_state = MovementState.EMERGENCY_STOP
         
-        await communication_manager.send_to_topic(
-            "emergency",
-            self.agent_id,
-            MessageType.EMERGENCY,
-            {
-                "event_type": "emergency_stop",
-                "position": self.position,
-                "vehicle_id": self.agent_id,
-                "reason": "Emergency situation detected"
-            }
-        )
+        # Communication manager disabled - emergency notification skipped
+        print(f"🚨 Vehicle {self.agent_id} emergency stop at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _yield_way(self):
         """Cede el paso a vehículos prioritarios"""
         self.current_speed *= 0.5
         self.movement_state = MovementState.WAITING
         
-        await communication_manager.send_to_topic(
-            "traffic",
-            self.agent_id,
-            MessageType.NOTIFICATION,
-            {
-                "action": "yielding_way",
-                "position": self.position,
-                "vehicle_id": self.agent_id
-            }
-        )
+        # Communication manager disabled - yield notification skipped
+        print(f"⚠️ Vehicle {self.agent_id} yielding way at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _slow_down(self):
         """Reduce la velocidad gradualmente"""
@@ -767,12 +842,37 @@ class CivilianTrafficAgent(BaseAgent):
         
     async def _move_vehicle(self):
         """Mueve el vehículo a lo largo de su ruta"""
+        # Si no tiene ruta, asignar una nueva automáticamente
         if not self.route or self.next_node is None:
-            return
+            await self._assign_random_destination()
+            
+            # Si aún no tiene ruta después del intento, hacer movimiento básico
+            if not self.route or self.next_node is None:
+                if self.current_speed > 0:
+                    # Movimiento básico sin ruta específica - movimiento más visible
+                    import math
+                    direction = random.uniform(0, 2 * math.pi)
+                    distance = (self.current_speed / 3600.0) * 0.1  # Conversión km/h a coordenadas por segundo
+                    
+                    self.lat += distance * math.cos(direction) * 0.01  # Factor de escala para visibilidad
+                    self.lon += distance * math.sin(direction) * 0.01
+                    self.position = (self.lat, self.lon)
+                    self.update_position(self.position)
+                return
         
-        # Calcular progreso en la arista actual con factor más alto para movimiento visible
-        movement_factor = self.current_speed * 0.05  # Aumentado de 0.01 a 0.05 para movimiento más rápido
-        self.progress += movement_factor
+        # Calcular progreso en la arista actual con factor de tiempo real
+        time_factor = 0.1  # Simulamos pasos de 100ms
+        speed_ms = self.current_speed / 3.6  # Convertir km/h a m/s
+        
+        # Obtener distancia de la arista actual
+        edge_distance = self._get_current_edge_distance()
+        if edge_distance > 0:
+            # Progreso basado en velocidad real y tiempo
+            progress_increment = (speed_ms * time_factor) / (edge_distance * 1000)  # km a m
+            self.progress += progress_increment
+        else:
+            # Fallback si no se puede calcular distancia
+            self.progress += self.current_speed * 0.01
         
         # Verificar si llegó al siguiente nodo
         if self.progress >= 1.0:
@@ -783,6 +883,37 @@ class CivilianTrafficAgent(BaseAgent):
         
         # Consumir combustible
         self._consume_fuel()
+    
+    def _get_current_edge_distance(self) -> float:
+        """Calcula la distancia de la arista actual en km"""
+        if not self.next_node or not hasattr(self, 'street_graph'):
+            return 1.0  # Distancia por defecto
+        
+        try:
+            if self.street_graph and self.street_graph.has_edge(self.current_node, self.next_node):
+                edge_data = self.street_graph[self.current_node][self.next_node]
+                # Buscar la distancia en los datos de la arista
+                if isinstance(edge_data, dict):
+                    for key, data in edge_data.items():
+                        if 'weight' in data:
+                            return data['weight']
+                        elif 'length' in data:
+                            return data['length']
+                elif 'weight' in edge_data:
+                    return edge_data['weight']
+                elif 'length' in edge_data:
+                    return edge_data['length']
+            
+            # Si no hay datos de distancia, calcular usando coordenadas
+            current_data = self.street_graph.nodes.get(self.current_node, {})
+            next_data = self.street_graph.nodes.get(self.next_node, {})
+            
+            if 'lat' in current_data and 'lat' in next_data:
+                return self.get_distance_to((next_data['lat'], next_data['lon']))
+        except Exception as e:
+            pass
+        
+        return 0.5  # Distancia por defecto en km
     
     async def _advance_to_next_node(self):
         """Avanza al siguiente nodo en la ruta"""
@@ -806,6 +937,9 @@ class CivilianTrafficAgent(BaseAgent):
                     self.has_destination = False
                     self.movement_state = MovementState.IDLE
                     await self._handle_destination_reached()
+                    
+                    # NUEVO: Asignar nuevo destino inmediatamente
+                    await self._request_new_destination()
             except ValueError:
                 # Error en la ruta, solicitar nueva
                 await self._request_route_change("Route error")
@@ -817,11 +951,36 @@ class CivilianTrafficAgent(BaseAgent):
         
         try:
             # Obtener las coordenadas de los nodos desde el grafo del entorno
-            # Necesitamos acceso al grafo, lo obtenemos del environment_state
-            # Por ahora usamos las coordenadas almacenadas en el agente
-            
-            if hasattr(self, '_street_graph') and self._street_graph:
+            if hasattr(self, 'street_graph') and self.street_graph:
                 # Obtener coordenadas reales de los nodos
+                current_node_data = self.street_graph.nodes[self.current_node]
+                next_node_data = self.street_graph.nodes[self.next_node]
+                
+                current_lat = current_node_data.get('lat', self.lat)
+                current_lon = current_node_data.get('lon', self.lon)
+                next_lat = next_node_data.get('lat', self.lat)
+                next_lon = next_node_data.get('lon', self.lon)
+                
+                # Interpolación suave con clamp del progreso
+                progress_clamped = max(0.0, min(1.0, self.progress))
+                
+                # Interpolación lineal entre nodos
+                interpolated_lat = current_lat + (next_lat - current_lat) * progress_clamped
+                interpolated_lon = current_lon + (next_lon - current_lon) * progress_clamped
+                
+                # Actualizar posición
+                old_position = (self.lat, self.lon)
+                self.lat = interpolated_lat
+                self.lon = interpolated_lon
+                self.position = (self.lat, self.lon)
+                self.update_position(self.position)
+                
+                # Debug para el primer vehículo
+                if self.agent_id == 'vehicle0' and abs(old_position[0] - self.lat) > 0.000001:
+                    print(f"🚗 {self.agent_id}: Movido de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({self.lat:.6f}, {self.lon:.6f}), progreso: {progress_clamped:.3f}")
+                
+            elif hasattr(self, '_street_graph') and self._street_graph:
+                # Usar grafo alternativo si está disponible
                 current_node_data = self._street_graph.nodes[self.current_node]
                 next_node_data = self._street_graph.nodes[self.next_node]
                 
@@ -830,32 +989,42 @@ class CivilianTrafficAgent(BaseAgent):
                 next_lat = next_node_data.get('lat', self.lat)
                 next_lon = next_node_data.get('lon', self.lon)
                 
-                # Interpolación lineal entre nodos
-                interpolated_lat = current_lat + (next_lat - current_lat) * self.progress
-                interpolated_lon = current_lon + (next_lon - current_lon) * self.progress
+                progress_clamped = max(0.0, min(1.0, self.progress))
                 
-                # Actualizar posición
+                interpolated_lat = current_lat + (next_lat - current_lat) * progress_clamped
+                interpolated_lon = current_lon + (next_lon - current_lon) * progress_clamped
+                
                 self.lat = interpolated_lat
                 self.lon = interpolated_lon
                 self.position = (self.lat, self.lon)
                 self.update_position(self.position)
             else:
-                # Fallback: movimiento simulado con pequeñas variaciones
-                direction = random.uniform(0, 2 * 3.14159)  # Dirección aleatoria
-                distance = self.current_speed * 0.00001  # Distancia basada en velocidad
+                # Fallback: movimiento simulado con dirección consistente
+                import math
+                if not hasattr(self, '_movement_direction'):
+                    self._movement_direction = random.uniform(0, 2 * math.pi)
                 
-                self.lat += distance * np.cos(direction)
-                self.lon += distance * np.sin(direction)
+                # Cambiar dirección ocasionalmente
+                if random.random() < 0.05:  # 5% de probabilidad de cambio de dirección
+                    self._movement_direction += random.uniform(-0.5, 0.5)
+                
+                distance = (self.current_speed / 3600.0) * 0.1 * 0.01  # Movimiento más realista
+                
+                self.lat += distance * math.cos(self._movement_direction)
+                self.lon += distance * math.sin(self._movement_direction)
                 self.position = (self.lat, self.lon)
                 self.update_position(self.position)
                 
         except Exception as e:
-            # Si hay error, hacer movimiento simulado básico
-            direction = random.uniform(0, 2 * 3.14159)
-            distance = self.current_speed * 0.00001
+            # Si hay error, hacer movimiento simulado básico pero consistente
+            import math
+            if not hasattr(self, '_movement_direction'):
+                self._movement_direction = random.uniform(0, 2 * math.pi)
             
-            self.lat += distance * np.cos(direction)
-            self.lon += distance * np.sin(direction)
+            distance = (self.current_speed / 3600.0) * 0.1 * 0.01
+            
+            self.lat += distance * math.cos(self._movement_direction)
+            self.lon += distance * math.sin(self._movement_direction)
             self.position = (self.lat, self.lon)
             self.update_position(self.position)
     
@@ -866,6 +1035,32 @@ class CivilianTrafficAgent(BaseAgent):
             consumption = (self.fuel_consumption_rate / 100) * (self.current_speed / 50) * 0.01
             self.fuel_level = max(0, self.fuel_level - consumption)
     
+    def _update_trail(self):
+        """Actualiza el rastro del vehículo para visualización"""
+        if self.position:
+            self.trail.append([self.lon, self.lat])  # deck.gl expects [lon, lat]
+            
+            # Limitar longitud del rastro
+            if len(self.trail) > self.max_trail_length:
+                self.trail.pop(0)
+    
+    def update_position(self, position):
+        """Actualiza la posición del agente"""
+        self.position = position
+        if position and len(position) >= 2:
+            self.lat = position[0]
+            self.lon = position[1]
+            
+            # Actualizar rastro para visualización
+            self._update_trail()
+            
+            # Actualizar distancia recorrida
+            if hasattr(self, '_last_position') and self._last_position:
+                distance = self.get_distance_to(self._last_position)
+                self.distance_traveled += distance
+            
+            self._last_position = position
+    
     async def _handle_destination_reached(self):
         """Maneja la llegada al destino"""
         self.arrival_time = datetime.now()
@@ -874,35 +1069,13 @@ class CivilianTrafficAgent(BaseAgent):
             travel_time = (self.arrival_time - self.departure_time).total_seconds()
             self.total_travel_time += travel_time
         
-        await communication_manager.send_to_topic(
-            "traffic",
-            self.agent_id,
-            MessageType.NOTIFICATION,
-            {
-                "event": "destination_reached",
-                "position": self.position,
-                "travel_time": travel_time if self.departure_time else 0,
-                "destination_type": self.destination_type
-            }
-        )
+        # Communication manager disabled - arrival notification skipped
+        print(f"🎯 Vehicle {self.agent_id} reached destination at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _communicate_intentions(self, decision: Dict[str, Any]):
         """Comunica intenciones a otros agentes"""
-        intentions = {
-            "vehicle_id": self.agent_id,
-            "position": self.position,
-            "current_speed": self.current_speed,
-            "movement_state": self.movement_state.value,
-            "next_node": self.next_node,
-            "emergency_response": decision.get("emergency_stop", False) or decision.get("yield_way", False)
-        }
-        
-        await communication_manager.send_to_topic(
-            "vehicle_updates",
-            self.agent_id,
-            MessageType.NOTIFICATION,
-            intentions
-        )
+        # Communication manager disabled - intention communication skipped
+        # print(f"💭 Vehicle {self.agent_id} intentions: speed={self.current_speed:.1f}, state={self.movement_state.value}")
     
     def _update_movement_metrics(self):
         """Actualiza métricas de movimiento"""
@@ -999,11 +1172,12 @@ class CivilianTrafficAgent(BaseAgent):
         perception = await self.perceive(environment_state)
         decision = await self.decide(perception)
         if await self.act(decision):
-            print(f"pincho la action !!! YEYYYY!!! del vehiculo {self.agent_id}")
+            # Debug específico para el primer vehículo
             if(self.agent_id == 'vehicle0'):
-                print(self)
+                print(f"🚗 {self.agent_id}: pos=({self.lat:.6f}, {self.lon:.6f}), speed={self.current_speed:.1f}, progress={self.progress:.2f}")
+                print(f"   Estado: {self.movement_state.value}, nodo actual: {self.current_node}, siguiente: {self.next_node}")
         else:
-            print(f"No pincho T_T :/ {self.agent_id}")
+            print(f"❌ No se pudo ejecutar acción para {self.agent_id}")
   
         
 

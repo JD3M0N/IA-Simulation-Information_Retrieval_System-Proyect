@@ -20,6 +20,16 @@ sys.path.append("src")
 sys.path.append("src/weather")
 sys.path.append("src/traffic_events")
 sys.path.append("src/crawler")
+sys.path.append("src/multi_agent")
+
+# Import communication manager - DISABLED
+try:
+    # from src.multi_agent.communication import communication_manager
+    COMMUNICATION_AVAILABLE = False
+    print("Communication manager disabled - using standalone simulation")
+except ImportError as e:
+    print(f"Advertencia: Communication manager no disponible: {e}")
+    COMMUNICATION_AVAILABLE = False
 
 try:
     from weather.weather_impact_analyzer import WeatherImpactAnalyzer
@@ -294,6 +304,7 @@ class Environment:
             v = CivilianTrafficAgent(vehicle_id=vehicle_id, initial_position=[node_data["lat"], node_data["lon"]], initial_node=start_node, behavior=behavior)
             
             # NUEVO: Dar acceso al grafo de calles para cálculos de posición
+            v.street_graph = self.street_graph
             v._street_graph = self.street_graph
             
             # Seleccionar destino aleatorio diferente al nodo inicial
@@ -308,6 +319,12 @@ class Environment:
                 destination_types = ["work", "home", "shopping", "recreation", "service"]
                 destination_type = random.choice(destination_types)
                 v.assign_route_and_destination(route, target_node, destination_type)
+                
+                # NUEVO: Inicializar velocidad para que se muevan inmediatamente
+                v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h para movimiento visible
+                v.movement_state = MovementState.MOVING  # Cambiar estado a movimiento
+                
+                print(f"   🛣️ Ruta calculada: {route[:3]}{'...' if len(route) > 3 else ''} ({len(route)} nodos)")
             
             except nx.NetworkXNoPath:
                 # Si no hay ruta posible, asignar un destino cercano
@@ -318,6 +335,10 @@ class Environment:
                         target_node = random.choice(neighbors)
                         route = [start_node, target_node]
                         v.assign_route_and_destination(route, target_node, "local")
+                        
+                        # NUEVO: Inicializar velocidad para movimiento inmediato
+                        v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h
+                        v.movement_state = MovementState.MOVING
                     else:
                         # Si no hay vecinos, crear ruta mínima
                         route = [start_node]
@@ -330,6 +351,20 @@ class Environment:
             # print(route)
             
             self.vehicles[vehicle_id] = v
+            
+            # Register vehicle with communication manager
+            if COMMUNICATION_AVAILABLE:
+                try:
+                    # Schedule registration for later when event loop is available
+                    self._pending_registrations = getattr(self, '_pending_registrations', [])
+                    self._pending_registrations.append(v)
+                    print(f"📝 Programado registro de {vehicle_id} en communication manager")
+                except Exception as e:
+                    print(f"⚠️ Error preparando registro de {vehicle_id}: {e}")
+            
+            print(f"✅ Vehículo {vehicle_id} creado con velocidad {v.current_speed:.1f} km/h, estado: {v.movement_state.value}")
+            print(f"   📍 Posición inicial: ({v.lat:.6f}, {v.lon:.6f}), nodo: {start_node}")
+            print(f"   🎯 Destino: nodo {target_node}, ruta: {len(route)} nodos")
             
 
     def _initialize_weather(self):
@@ -668,6 +703,10 @@ class Environment:
     
     async def step(self):
         """Avanza la simulación un paso"""
+        # Register pending agents if needed
+        if hasattr(self, '_pending_registrations') and self._pending_registrations:
+            await self._register_pending_agents()
+        
         # Actualizar tiempo
         self.current_time += timedelta(seconds=self.time_step)
         
@@ -690,6 +729,17 @@ class Environment:
         
         # Limpiar eventos expirados
         self._cleanup_expired_events()
+    
+    async def _register_pending_agents(self):
+        """Registra agentes pendientes en el communication manager"""
+        if not COMMUNICATION_AVAILABLE:
+            # Clear pending registrations since communication is disabled
+            self._pending_registrations.clear()
+            return
+            
+        # Communication manager is disabled, just clear the list
+        self._pending_registrations.clear()
+        print("Communication manager disabled - skipping agent registration")
     
     async def _update_vehicle_positions(self):
         """Actualiza posiciones de todos los vehículos"""
@@ -908,20 +958,26 @@ class Environment:
         vehicle_positions = []
         
         for vehicle_id, vehicle in self.vehicles.items():
+            # Asegurar que las coordenadas sean números válidos
+            lat = float(vehicle.lat) if vehicle.lat is not None else 0.0
+            lon = float(vehicle.lon) if vehicle.lon is not None else 0.0
+            
             position_data = {
                 "id": vehicle_id,
-                "lat": vehicle.lat,
-                "lon": vehicle.lon,
-                "speed": vehicle.current_speed,
+                "lat": lat,
+                "lon": lon,
+                "position": [lat, lon],  # Formato alternativo para deck.gl
+                "speed": float(vehicle.current_speed) if vehicle.current_speed is not None else 0.0,
                 "behavior": vehicle.behavior.value if hasattr(vehicle.behavior, 'value') else str(vehicle.behavior),
                 "state": vehicle.movement_state.value if hasattr(vehicle.movement_state, 'value') else str(vehicle.movement_state),
-                "type": vehicle.vehicle_type.value if hasattr(vehicle.vehicle_type, 'value') else str(vehicle.vehicle_type),
+                "type": vehicle.vehicle_type if isinstance(vehicle.vehicle_type, str) else (vehicle.vehicle_type.value if hasattr(vehicle.vehicle_type, 'value') else "car"),
                 "current_node": vehicle.current_node,
                 "next_node": vehicle.next_node,
-                "progress": vehicle.progress,
-                "fuel_level": vehicle.fuel_level,
-                "has_destination": vehicle.has_destination,
-                "target_node": vehicle.target_node
+                "progress": float(vehicle.progress) if vehicle.progress is not None else 0.0,
+                "fuel_level": float(vehicle.fuel_level) if vehicle.fuel_level is not None else 100.0,
+                "has_destination": bool(vehicle.has_destination),
+                "target_node": vehicle.target_node,
+                "trail": getattr(vehicle, 'trail', [])  # Add trail for visualization
             }
             vehicle_positions.append(position_data)
         

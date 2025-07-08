@@ -16,7 +16,7 @@ from src.multi_agent.simulation_environment import SimulationEnvironment
 from src.multiagent.environment import Environment
 from src.vehicle import initialize_vehicles, update_vehicle_positions
 from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
-from src.optimized_route import optimize_delivery_routes
+from src.optimized_route import optimize_delivery_routes    
 from src.NLP.cvrp_assistant import analyze_cvrp_requirements
 from src.NLP.RAG import create_vrp_rag_assistant
 
@@ -25,8 +25,7 @@ from src.multi_agent import (
     create_simulation_environment, 
     get_simulation_environment,
     VehicleAgent,
-    VehicleBehavior,
-    communication_manager
+    VehicleBehavior
 )
 from src.multi_agent.websocket_handlers import (
     handle_route_optimization_request,
@@ -256,6 +255,32 @@ async def send_positions(websocket):
                     vehicle_positions = simulation_environment.get_vehicle_positions()
                     vehicle_data = vehicle_positions
                     multi_agent_status = simulation_environment.get_simulation_status()
+                    
+                    # Debug info for vehicle movement
+                    if vehicle_data and len(vehicle_data) > 0:
+                        if hasattr(send_positions, '_debug_counter'):
+                            send_positions._debug_counter += 1
+                        else:
+                            send_positions._debug_counter = 1
+                        
+                        # Log every 50 updates to avoid spam
+                        if send_positions._debug_counter % 50 == 0:
+                            print(f"📡 Enviando {len(vehicle_data)} vehículos al cliente")
+                            if vehicle_data:
+                                first_vehicle = vehicle_data[0]
+                                print(f"   🚗 Ejemplo: {first_vehicle['id']} en ({first_vehicle['lat']:.6f}, {first_vehicle['lon']:.6f}) velocidad: {first_vehicle.get('speed', 0):.1f} km/h")
+                                print(f"   🎯 Estado: {first_vehicle.get('state', 'unknown')}, comportamiento: {first_vehicle.get('behavior', 'unknown')}")
+                        
+                        # Validar datos antes de enviar
+                        valid_vehicles = []
+                        for vehicle in vehicle_data:
+                            if isinstance(vehicle.get('lat'), (int, float)) and isinstance(vehicle.get('lon'), (int, float)):
+                                valid_vehicles.append(vehicle)
+                            else:
+                                print(f"⚠️ Vehículo {vehicle.get('id', 'unknown')} tiene coordenadas inválidas: lat={vehicle.get('lat')}, lon={vehicle.get('lon')}")
+                        
+                        vehicle_data = valid_vehicles
+                    
                 except Exception as e:
                     print(f"Error obteniendo datos de simulación: {e}")
             
@@ -293,7 +318,7 @@ async def send_positions(websocket):
             }
             
             await websocket.send(json.dumps(payload))
-            await asyncio.sleep(0.1)  # Actualización aún más frecuente para movimiento fluido (10 FPS)
+            await asyncio.sleep(0.05)  # Actualización muy frecuente para movimiento fluido (20 FPS)
         except websockets.exceptions.ConnectionClosed:
             print("Cliente desconectado")
             break
@@ -746,7 +771,7 @@ async def run_simulation():
                 print(f"📊 Simulación: {step_count} pasos completados")
             
             # Pausa entre pasos para controlar la velocidad de simulación
-            await asyncio.sleep(0.05)  # Reducido de 0.1 a 0.05 para movimiento más fluido (20 FPS)
+            await asyncio.sleep(0.02)  # Reducido de 0.05 a 0.02 para movimiento más fluido (50 FPS)
             
         except Exception as e:
             print(f"❌ Error en simulación: {e}")
@@ -764,14 +789,11 @@ async def main():
     simulation_environment = Environment(street_graph)
     print(simulation_environment)
     print("Entorno de simulación creado")
+    
+    # Removed communication manager initialization
+    print("✅ Sistema de simulación iniciado sin communication manager")
     print("==========================================================")
     
-    # Ejecutar algunos pasos iniciales para verificar que funciona
-    print("🔄 Ejecutando pasos iniciales de simulación...")
-    for i in range(5):
-        print(f"Paso inicial {i+1}/5")
-        await simulation_environment.step()
-    print("✅ Pasos iniciales completados")
     
     print("Servidor WebSocket iniciando en puerto 8765...")
     

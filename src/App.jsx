@@ -135,7 +135,13 @@ function App() {
 
             // Si es una actualización de posiciones
             if (data.vehicles) {
-              console.log(`Recibidos datos para ${data.vehicles.length} vehículos`);
+              console.log(`📊 Recibidos datos para ${data.vehicles.length} vehículos`);
+
+              // Debug: log datos del primer vehículo
+              if (data.vehicles.length > 0) {
+                const firstVehicle = data.vehicles[0];
+                console.log(`🚗 Vehículo ${firstVehicle.id}: lat=${firstVehicle.lat?.toFixed(6)}, lon=${firstVehicle.lon?.toFixed(6)}, speed=${firstVehicle.speed}`);
+              }
 
               const updated = {};
               data.vehicles.forEach((v) => {
