@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from src.multiagent.civilian_traffic import CivilianTrafficAgent
+from src.multiagent.weather_agent import WeatherAgent
 from src.multiagent.Civilian_enums import *
 from src.multiagent.Environment_enums import *
 
@@ -145,7 +146,13 @@ class Environment:
         self.time_step = 1.0  # segundos por paso de simulación
         self.simulation_speed = 1.0  # Multiplicador de velocidad
         
-        # Estado del clima
+        # Agente de clima especializado
+        self.weather_agent = WeatherAgent(
+            agent_id="main_weather_agent",
+            location=(23.1136, -82.3666)  # Coordenadas por defecto 
+        )
+        
+        # Estado del clima (ahora manejado por el agente)
         self.weather_state = WeatherState()
         self.weather_forecast = []  # Pronóstico futuro
         
@@ -224,13 +231,27 @@ class Environment:
         # Inicializar tráfico civil
         self._initialize_civilian_traffic()
         
-        # Configurar clima inicial
+        # Configurar clima inicial usando el agente
         self._initialize_weather()
-        
         
         # Imprimir estado inicial del entorno
         print(f"✅ Entorno inicializado: {len(self.road_segments)} segmentos, "
               f"{len(self.traffic_lights)} semáforos, {len(self.vehicles)} vehículos")
+        print(f"🌤️ Agente de clima inicializado: {self.weather_agent}")
+        
+    def _initialize_weather(self):
+        """Inicializa el clima usando el agente especializado"""
+        # Sincronizar el estado del clima con el agente
+        agent_weather = self.weather_agent.get_current_weather()
+        
+        self.weather_state.condition = agent_weather["condition"]
+        self.weather_state.temperature = agent_weather["temperature"]
+        self.weather_state.humidity = agent_weather["humidity"]
+        self.weather_state.wind_speed = agent_weather["wind_speed"]
+        self.weather_state.precipitation = agent_weather["precipitation"]
+        self.weather_state.visibility = agent_weather["visibility"]
+        self.weather_state.pressure = agent_weather["pressure"]
+        self.weather_state.timestamp = agent_weather["timestamp"]
     
     def _initialize_road_segments(self):
         for edge in self.street_graph.edges(data=True):
@@ -365,33 +386,6 @@ class Environment:
             print(f"✅ Vehículo {vehicle_id} creado con velocidad {v.current_speed:.1f} km/h, estado: {v.movement_state.value}")
             print(f"   📍 Posición inicial: ({v.lat:.6f}, {v.lon:.6f}), nodo: {start_node}")
             print(f"   🎯 Destino: nodo {target_node}, ruta: {len(route)} nodos")
-            
-
-    def _initialize_weather(self):
-        # Configurar estado inicial basado en estación y ubicación
-        current_month = self.current_time.month
-        
-        if current_month in [6, 7, 8]:  # Verano
-            self.weather_state.temperature = random.uniform(25, 35)
-            self.weather_state.humidity = random.uniform(60, 85)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.LIGHT_RAIN, WeatherCondition.EXTREME_HEAT
-            ])
-        elif current_month in [12, 1, 2]:  # Invierno
-            self.weather_state.temperature = random.uniform(10, 25)
-            self.weather_state.humidity = random.uniform(40, 70)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.FOG, WeatherCondition.LIGHT_RAIN
-            ])
-        else:  # Primavera/Otoño
-            self.weather_state.temperature = random.uniform(15, 30)
-            self.weather_state.humidity = random.uniform(50, 80)
-            self.weather_state.condition = random.choice([
-                WeatherCondition.CLEAR, WeatherCondition.CLOUDY, 
-                WeatherCondition.LIGHT_RAIN, WeatherCondition.STORM
-            ])
     
     def add_delivery_truck(self, truck_id: str, start_node: int, 
                           capacity: int = 1000, **kwargs) -> bool:
@@ -476,61 +470,48 @@ class Environment:
         
         return False
     
-    def update_weather(self, new_weather: Optional[WeatherState] = None):
-        """Actualiza el estado del clima"""
+    async def update_weather(self, new_weather: Optional[WeatherState] = None):
+        """Actualiza el estado del clima usando el agente especializado"""
         if new_weather:
+            # Si se proporciona un nuevo estado, lo aplicamos directamente
             self.weather_state = new_weather
         else:
-            # Generación automática basada en patrones
-            self._generate_weather_evolution()
+            # Usar el agente de clima para la evolución natural
+            await self.weather_agent.next_step(self.get_environment_state())
+            
+            # Sincronizar el estado del clima con el agente
+            agent_weather = self.weather_agent.get_current_weather()
+            
+            self.weather_state.condition = agent_weather["condition"]
+            self.weather_state.temperature = agent_weather["temperature"]
+            self.weather_state.humidity = agent_weather["humidity"]
+            self.weather_state.wind_speed = agent_weather["wind_speed"]
+            self.weather_state.precipitation = agent_weather["precipitation"]
+            self.weather_state.visibility = agent_weather["visibility"]
+            self.weather_state.pressure = agent_weather["pressure"]
+            self.weather_state.timestamp = agent_weather["timestamp"]
         
         # Aplicar impacto del clima a los segmentos
         self._apply_weather_impact()
     
-    def _generate_weather_evolution(self):
-        """Genera evolución natural del clima"""
-        # Cambios graduales en temperatura y humedad
-        temp_change = random.uniform(-2, 2)
-        humidity_change = random.uniform(-5, 5)
-        
-        self.weather_state.temperature += temp_change
-        self.weather_state.humidity += humidity_change
-        
-        # Limitar rangos
-        self.weather_state.temperature = max(-10, min(50, self.weather_state.temperature))
-        self.weather_state.humidity = max(0, min(100, self.weather_state.humidity))
-        
-        # Posibilidad de cambio de condición
-        if random.random() < 0.1:  # 10% probabilidad
-            self.weather_state.condition = random.choice(list(WeatherCondition))
-        
-        # Actualizar otros parámetros
-        if self.weather_state.condition in [WeatherCondition.LIGHT_RAIN, WeatherCondition.HEAVY_RAIN]:
-            self.weather_state.precipitation = random.uniform(1, 20)
-        elif self.weather_state.condition == WeatherCondition.STORM:
-            self.weather_state.precipitation = random.uniform(10, 50)
-            self.weather_state.wind_speed = random.uniform(30, 80)
-        else:
-            self.weather_state.precipitation = 0.0
-            self.weather_state.wind_speed = random.uniform(5, 25)
-    
     def _apply_weather_impact(self):
-        """Aplica el impacto del clima a todos los segmentos"""
-        base_factor = 1.0
+        """Aplica el impacto del clima a todos los segmentos usando factores del agente"""
+        # Obtener factores de impacto del agente de clima
+        impact_factors = self.weather_agent.get_weather_impact_factors()
+        base_speed_factor = impact_factors.get("speed_factor", 1.0)
         
-        # Factores por condición climática
+        # Factores por condición climática (mantenemos compatibilidad)
         weather_factors = {
-            WeatherCondition.CLEAR: 1.0,
-            WeatherCondition.CLOUDY: 1.05,
-            WeatherCondition.LIGHT_RAIN: 1.3,
-            WeatherCondition.HEAVY_RAIN: 1.8,
-            WeatherCondition.STORM: 2.5,
-            WeatherCondition.FOG: 1.6,
-            WeatherCondition.SNOW: 3.0,
-            WeatherCondition.EXTREME_HEAT: 1.2
+            WeatherCondition.CLEAR: base_speed_factor,
+            WeatherCondition.CLOUDY: base_speed_factor * 1.05,
+            WeatherCondition.LIGHT_RAIN: base_speed_factor * 1.3,
+            WeatherCondition.HEAVY_RAIN: base_speed_factor * 1.8,
+            WeatherCondition.STORM: base_speed_factor * 2.5,
+            WeatherCondition.FOG: base_speed_factor * 1.6,
+            WeatherCondition.EXTREME_HEAT: base_speed_factor * 1.2
         }
         
-        weather_factor = weather_factors.get(self.weather_state.condition, 1.0)
+        weather_factor = weather_factors.get(self.weather_state.condition, base_speed_factor)
         
         # Aplicar a todos los segmentos
         for segment in self.road_segments.values():
@@ -594,14 +575,21 @@ class Environment:
             "simulation_time": (self.current_time - self.simulation_start_time).total_seconds(),
             "time_step": self.time_step,
             
-            # Estado del clima
+            # Estado del clima (incluye información del agente)
             "weather": {
                 "condition": self.weather_state.condition.value,
                 "temperature": self.weather_state.temperature,
                 "humidity": self.weather_state.humidity,
                 "precipitation": self.weather_state.precipitation,
                 "wind_speed": self.weather_state.wind_speed,
-                "visibility": self.weather_state.visibility
+                "visibility": self.weather_state.visibility,
+                "pressure": self.weather_state.pressure,
+                "timestamp": self.weather_state.timestamp.isoformat() if self.weather_state.timestamp else None,
+                # Información adicional del agente
+                "impact_factors": self.get_weather_impact_factors(),
+                "agent_metrics": self.get_weather_agent_metrics(),
+                "has_extreme_event": self.weather_agent.current_extreme_event is not None,
+                "extreme_event_type": self.weather_agent.current_extreme_event.value if self.weather_agent.current_extreme_event else None
             },
             
             # Vehículos civiles
@@ -715,10 +703,10 @@ class Environment:
         self.update_traffic_lights()
         self.update_congestion()
         
-        # Actualizar clima periódicamente
+        # Actualizar clima periódicamente usando el agente
         if (self.current_time.timestamp() % 
             self.weather_generator_config["update_interval"]) < self.time_step:
-            self.update_weather()
+            await self.update_weather()
         
         # Generar eventos de tráfico
         if random.random() < self.traffic_generator_config["event_probability"]:
@@ -940,6 +928,40 @@ class Environment:
             {"type": "school", "zones": self.school_zones}
         ]
     
+    # Métodos para interactuar con el agente de clima
+    def get_weather_forecast(self, hours_ahead: int = 1) -> Optional[Dict[str, Any]]:
+        """Obtiene pronóstico del clima del agente"""
+        forecast = self.weather_agent.get_forecast(hours_ahead)
+        if forecast:
+            return {
+                "timestamp": forecast.timestamp.isoformat(),
+                "condition": forecast.condition.value,
+                "temperature": forecast.temperature,
+                "humidity": forecast.humidity,
+                "wind_speed": forecast.wind_speed,
+                "precipitation": forecast.precipitation,
+                "visibility": forecast.visibility,
+                "pressure": forecast.pressure,
+                "confidence": forecast.confidence
+            }
+        return None
+    
+    def get_weather_history(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Obtiene historial del clima del agente"""
+        return self.weather_agent.get_weather_history(hours)
+    
+    def get_weather_impact_factors(self) -> Dict[str, float]:
+        """Obtiene factores de impacto del clima actual"""
+        return self.weather_agent.get_weather_impact_factors()
+    
+    def export_weather_data(self) -> Dict[str, Any]:
+        """Exporta todos los datos del clima"""
+        return self.weather_agent.export_weather_data()
+    
+    def get_weather_agent_metrics(self) -> Dict[str, Any]:
+        """Obtiene métricas del agente de clima"""
+        return self.weather_agent.metrics.copy()
+
     def __str__(self) -> str:
         return (f"Environment(vehicles={len(self.vehicles)}, "
                 f"delivery_trucks={len(self.delivery_trucks)}, "
