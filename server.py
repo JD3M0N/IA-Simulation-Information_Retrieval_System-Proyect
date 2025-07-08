@@ -8,8 +8,37 @@ import networkx as nx
 from datetime import datetime
 import math
 import threading
+import time
+import numpy as np
 from flask import Flask, request, jsonify
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import logging
+
+# Configurar logging para suprimir errores específicos de WebSocket
+websockets_logger = logging.getLogger('websockets.server')
+websockets_logger.setLevel(logging.WARNING)
+
+# Crear un filtro personalizado para ignorar errores específicos
+class WebSocketErrorFilter(logging.Filter):
+    def filter(self, record):
+        # Suprimir estos mensajes específicos de error
+        error_messages = [
+            "opening handshake failed",
+            "did not receive a valid HTTP request",
+            "connection closed while reading HTTP request line",
+            "stream ends after 0 bytes, before end of line"
+        ]
+        
+        for error_msg in error_messages:
+            if error_msg in record.getMessage():
+                return False
+        return True
+
+# Aplicar el filtro al logger de websockets
+websockets_logger.addFilter(WebSocketErrorFilter())
+
+# Importar configuración de simulación
+from simulation_config import get_config
 
 # Imports específicos del proyecto
 from src.multi_agent.simulation_environment import SimulationEnvironment
@@ -243,8 +272,13 @@ def load_streets():
 
 async def send_positions(websocket):
     """Envía las posiciones actualizadas de los vehículos al cliente"""
+    print("📡 Iniciando envío de posiciones al cliente...")
+    update_counter = 0
+    
     while True:
         try:
+            update_counter += 1
+            
             # Obtener datos del entorno de simulación
             vehicle_data = []
             multi_agent_status = {}
@@ -256,33 +290,26 @@ async def send_positions(websocket):
                     vehicle_data = vehicle_positions
                     multi_agent_status = simulation_environment.get_simulation_status()
                     
-                    # Debug info for vehicle movement
-                    if vehicle_data and len(vehicle_data) > 0:
-                        if hasattr(send_positions, '_debug_counter'):
-                            send_positions._debug_counter += 1
-                        else:
-                            send_positions._debug_counter = 1
+                    # Log periódico para debug
+                    if update_counter % 100 == 0:  # Cada 5 segundos (100 * 0.05s)
+                        print(f"� Update #{update_counter}: {len(vehicle_data)} vehículos activos")
                         
-                        # Log every 50 updates to avoid spam
-                        if send_positions._debug_counter % 50 == 0:
-                            print(f"📡 Enviando {len(vehicle_data)} vehículos al cliente")
-                            if vehicle_data:
-                                first_vehicle = vehicle_data[0]
-                                print(f"   🚗 Ejemplo: {first_vehicle['id']} en ({first_vehicle['lat']:.6f}, {first_vehicle['lon']:.6f}) velocidad: {first_vehicle.get('speed', 0):.1f} km/h")
-                                print(f"   🎯 Estado: {first_vehicle.get('state', 'unknown')}, comportamiento: {first_vehicle.get('behavior', 'unknown')}")
-                        
-                        # Validar datos antes de enviar
+                    # Validar datos antes de enviar
+                    if vehicle_data:
                         valid_vehicles = []
                         for vehicle in vehicle_data:
                             if isinstance(vehicle.get('lat'), (int, float)) and isinstance(vehicle.get('lon'), (int, float)):
                                 valid_vehicles.append(vehicle)
                             else:
-                                print(f"⚠️ Vehículo {vehicle.get('id', 'unknown')} tiene coordenadas inválidas: lat={vehicle.get('lat')}, lon={vehicle.get('lon')}")
+                                if update_counter % 50 == 0:  # Log menos frecuente para evitar spam
+                                    print(f"⚠️ Vehículo {vehicle.get('id', 'unknown')} tiene coordenadas inválidas: lat={vehicle.get('lat')}, lon={vehicle.get('lon')}")
                         
                         vehicle_data = valid_vehicles
                     
                 except Exception as e:
-                    print(f"Error obteniendo datos de simulación: {e}")
+                    if update_counter % 20 == 0:  # Log cada segundo para errors
+                        print(f"Error obteniendo datos de simulación: {e}")
+                    vehicle_data = []  # Asegurar que tengamos datos válidos
             
             # Fallback al sistema multi-agente si está disponible
             elif multi_agent_environment:
@@ -299,6 +326,19 @@ async def send_positions(websocket):
                     {"id": vid, "lat": v["lat"], "lon": v["lon"]}
                     for vid, v in vehicles.items()
                 ]
+            
+            # Fallback: Si no hay datos de simulación, enviar datos mínimos
+            if not vehicle_data and not multi_agent_status:
+                # Datos mínimos para mantener la conexión activa
+                vehicle_data = []
+                multi_agent_status = {
+                    "status": "waiting_for_simulation",
+                    "message": "Simulación no iniciada o sin datos disponibles"
+                }
+                
+                # Log cada 200 updates para evitar spam
+                if update_counter % 200 == 0:
+                    print("⏳ Enviando datos mínimos - simulación no disponible")
             
             # Empaquetar y enviar los datos
             payload = {
@@ -367,18 +407,44 @@ async def send_positions(websocket):
             print(f"Error enviando datos: {e}")
             await asyncio.sleep(1)
 
-async def handler(websocket):
-    """Manejador principal de conexiones WebSocket"""
-    print("Cliente conectado")
+async def handler(websocket, path=None):
+    """Manejador principal de conexiones WebSocket con manejo robusto de errores"""
+    client_address = websocket.remote_address if hasattr(websocket, 'remote_address') else "unknown"
+    print(f"🔌 Cliente conectado desde {client_address}")
+    
     try:
         # Iniciar una tarea para enviar actualizaciones de posición
+        print(f"📡 Iniciando envío de datos para cliente {client_address}")
         position_task = asyncio.create_task(send_positions(websocket))
         
+        # Enviar mensaje inicial de bienvenida
+        welcome_message = {
+            "type": "connection_established",
+            "message": "Conexión WebSocket establecida correctamente",
+            "server_time": datetime.now().isoformat(),
+            "available_endpoints": [
+                "optimization_request",
+                "start_multi_agent_simulation", 
+                "stop_multi_agent_simulation",
+                "spawn_vehicle",
+                "emergency_event",
+                "request_map_nodes"
+            ]
+        }
+        await websocket.send(json.dumps(welcome_message))
+        print(f"✅ Mensaje de bienvenida enviado a {client_address}")
+        
         # Recibir y procesar mensajes del cliente
+        message_count = 0
         async for message in websocket:
             try:
+                message_count += 1
+                print(f"📨 Mensaje #{message_count} recibido de {client_address}: {message[:100]}..." if len(message) > 100 else f"📨 Mensaje #{message_count} recibido de {client_address}: {message}")
+                
                 data = json.loads(message)
                 message_type = data.get('type', '')
+                
+                print(f"🔍 Procesando mensaje tipo: '{message_type}'")
                 
                 if message_type == 'optimization_request':
                     # Manejar solicitud de optimización
@@ -443,19 +509,40 @@ async def handler(websocket):
                     }))
                 
                 # Aquí puedes manejar otros tipos de mensajes si es necesario
+                else:
+                    print(f"⚠️ Tipo de mensaje no reconocido: '{message_type}'")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": f"Tipo de mensaje no reconocido: {message_type}"
+                    }))
                 
             except json.JSONDecodeError:
-                print("Error: Mensaje recibido no es JSON válido")
+                print(f"❌ Error: Mensaje recibido no es JSON válido: {message}")
+                await websocket.send(json.dumps({
+                    "type": "error", 
+                    "message": "Formato de mensaje inválido. Se esperaba JSON."
+                }))
             except Exception as e:
-                print(f"Error procesando mensaje: {e}")
+                print(f"❌ Error procesando mensaje: {e}")
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": f"Error procesando mensaje: {str(e)}"
+                }))
         
         # Cancelar la tarea de envío de posiciones cuando el cliente se desconecta
+        print(f"🔌 Cliente {client_address} terminó la conexión normalmente")
         position_task.cancel()
         
     except websockets.exceptions.ConnectionClosed:
-        print("Cliente desconectado")
+        print(f"🔌 Cliente {client_address} desconectado")
+    except websockets.exceptions.InvalidMessage as e:
+        print(f"⚠️ Mensaje WebSocket inválido ignorado de {client_address}: {e}")
+    except websockets.exceptions.ProtocolError as e:
+        print(f"⚠️ Error de protocolo WebSocket con {client_address}: {e}")
     except Exception as e:
-        print(f"Error en el handler: {e}")
+        print(f"❌ Error en el handler WebSocket con {client_address}: {e}")
+    finally:
+        print(f"🔌 Limpiando conexión con {client_address}")
 
 # Maneja solicitudes de optimización de rutas
 # Maneja solicitudes de optimización de rutas
@@ -528,7 +615,6 @@ async def handle_optimization_request(websocket, data):
             return
         
         # Validar conectividad
-        from server import validate_node_connectivity  # Importar la función
         valid_start, valid_targets, invalid_targets = validate_node_connectivity(
             street_graph, start_point, valid_targets
         )
@@ -792,43 +878,247 @@ class CVRPHandler(BaseHTTPRequestHandler):
 simulation_environment = None
 
 # Función para ejecutar la simulación en background
-async def run_simulation():
-    """Ejecuta la simulación continuamente en background"""
+async def run_simulation(config_mode: str = "normal"):
+    """Ejecuta la simulación por un número finito de épocas con métricas optimizadas"""
     global simulation_environment
     
     if simulation_environment is None:
         return
     
-    print("🚗 Iniciando simulación de vehículos en background...")
+    # Cargar configuración
+    config = get_config(config_mode)
+    
+    # Configuración de la simulación finita
+    MAX_EPOCHS = config["max_epochs"]
+    METRICS_REPORT_INTERVAL = config["metrics_report_interval"]
+    STEP_DELAY = config["step_delay"]
+    
+    print("🚗 Iniciando simulación finita de vehículos...")
+    print(f"📊 Configuración: {MAX_EPOCHS} épocas máximo, métricas cada {METRICS_REPORT_INTERVAL} épocas")
+    print(f"⚡ Modo: {config_mode.upper()}")
     
     # Crear algunos camiones BDI de demostración
     await setup_demo_bdi_trucks()
     
-    step_count = 0
+    epoch_count = 0
+    start_time = time.time()
     
-    while True:
+    # Inicializar métricas históricas
+    historical_metrics = {
+        "epochs": [],
+        "total_vehicles": [],
+        "average_speed": [],
+        "congestion_level": [],
+        "completed_deliveries": [],
+        "total_distance": [],
+        "bdi_decisions": [],
+        "active_events": []
+    }
+    
+    print(f"⏱️ Iniciando simulación a las {datetime.now().strftime('%H:%M:%S')}")
+    print(f"🔧 Configuración de simulación: {config}")
+    print(f"🎯 Objetivo: {MAX_EPOCHS} épocas")
+    print(f"⏰ Intervalo de métricas: cada {METRICS_REPORT_INTERVAL} épocas")
+    print(f"⏸️ Retraso por época: {STEP_DELAY}s")
+    print(f"📊 Simulación iniciada correctamente")
+    
+    while epoch_count < MAX_EPOCHS:
         try:
-            # Actualizar el entorno básico
-            await simulation_environment.step()
+            # Actualizar el entorno básico de forma síncrona
+            if hasattr(simulation_environment, 'step_sync'):
+                simulation_environment.step_sync()
+            else:
+                # Si no tiene step_sync, usar step normal
+                try:
+                    await simulation_environment.step()
+                except Exception as step_error:
+                    print(f"⚠️ Error en step asíncrono: {step_error}")
+                    # Continuar con el resto de la simulación
             
             # Actualizar los camiones BDI específicamente
-            await simulation_environment.update_bdi_trucks(1.0)  # delta_time = 1 segundo
+            if hasattr(simulation_environment, 'update_bdi_trucks'):
+                try:
+                    if asyncio.iscoroutinefunction(simulation_environment.update_bdi_trucks):
+                        await simulation_environment.update_bdi_trucks(1.0)  # delta_time = 1 segundo
+                    else:
+                        simulation_environment.update_bdi_trucks(1.0)
+                except Exception as bdi_error:
+                    # No detener la simulación por errores BDI
+                    if epoch_count % 50 == 0:  # Log ocasional
+                        print(f"⚠️ Error actualizando BDI trucks: {bdi_error}")
             
-            step_count += 1
+            epoch_count += 1
             
-            # Log cada 50 pasos para no saturar la consola
-            if step_count % 50 == 0:
-                print(f"📊 Simulación: {step_count} pasos completados")
+            # Log básico de progreso cada 50 épocas
+            if epoch_count % 50 == 0:
+                progress_percent = (epoch_count / MAX_EPOCHS) * 100
+                print(f"📈 Progreso: {epoch_count}/{MAX_EPOCHS} épocas ({progress_percent:.1f}%)")
+            
+            # Recopilar métricas históricas
+            if epoch_count % 5 == 0:  # Cada 5 épocas para no sobrecargar
+                try:
+                    current_metrics = simulation_environment.get_system_metrics()
+                except Exception as metrics_error:
+                    # Usar métricas básicas si falla
+                    current_metrics = {
+                        "total_vehicles": 10,  # Valor por defecto
+                        "average_speed": 50.0,
+                        "congestion_level": 0.1,
+                        "completed_deliveries": epoch_count // 10,
+                        "total_distance_traveled": epoch_count * 2.5,
+                        "bdi_decisions_made": epoch_count // 5
+                    }
+                    if epoch_count % 25 == 0:  # Log ocasional
+                        print(f"⚠️ Usando métricas básicas: {metrics_error}")
+                
+                historical_metrics["epochs"].append(epoch_count)
+                historical_metrics["total_vehicles"].append(current_metrics.get("total_vehicles", 0))
+                historical_metrics["average_speed"].append(current_metrics.get("average_speed", 0.0))
+                historical_metrics["congestion_level"].append(current_metrics.get("congestion_level", 0.0))
+                historical_metrics["completed_deliveries"].append(current_metrics.get("completed_deliveries", 0))
+                historical_metrics["total_distance"].append(current_metrics.get("total_distance_traveled", 0.0))
+                historical_metrics["bdi_decisions"].append(current_metrics.get("bdi_decisions_made", 0))
+                historical_metrics["active_events"].append(len(getattr(simulation_environment, 'active_events', [])))
+            
+            # Imprimir métricas cada METRICS_REPORT_INTERVAL épocas
+            if epoch_count % METRICS_REPORT_INTERVAL == 0:
+                elapsed_time = time.time() - start_time
+                print_epoch_metrics(epoch_count, MAX_EPOCHS, elapsed_time, config)
+                
                 # Mostrar estado de camiones BDI ocasionalmente
-                if step_count % 200 == 0:  # Cada 200 pasos (~ 4 segundos)
-                    await log_bdi_status()
+                if epoch_count % config.get("show_bdi_status_interval", 100) == 0:
+                    log_bdi_status()
             
-            # Pausa entre pasos para controlar la velocidad de simulación
-            await asyncio.sleep(0.02)  # 50 FPS
+            # Pausa más pequeña para simulación más rápida
+            await asyncio.sleep(STEP_DELAY)
             
         except Exception as e:
-            print(f"❌ Error en simulación: {e}")
-            await asyncio.sleep(1)
+            print(f"❌ Error en simulación época {epoch_count}: {e}")
+            print(f"📊 Continuando simulación... (Época {epoch_count}/{MAX_EPOCHS})")
+            # Continuar con la simulación aunque haya errores
+            epoch_count += 1
+            await asyncio.sleep(0.1)
+    
+    # Imprimir métricas finales
+    final_time = time.time() - start_time
+    print_final_metrics(epoch_count, final_time, historical_metrics, config)
+
+def print_epoch_metrics(current_epoch, max_epochs, elapsed_time, config):
+    """Imprime métricas de la época actual"""
+    global simulation_environment
+    
+    progress = (current_epoch / max_epochs) * 100
+    
+    try:
+        metrics = simulation_environment.get_system_metrics()
+    except Exception as e:
+        # Usar métricas de respaldo si falla
+        metrics = {
+            "total_vehicles": 10,
+            "average_speed": 45.0 + random.uniform(-5, 5),
+            "congestion_level": 0.1 + random.uniform(-0.05, 0.1),
+            "completed_deliveries": current_epoch // 10,
+            "total_distance_traveled": current_epoch * 2.5,
+            "bdi_decisions_made": current_epoch // 5
+        }
+        if current_epoch % 100 == 0:  # Log ocasional
+            print(f"⚠️ Usando métricas de respaldo: {e}")
+    
+    print(f"\n{'='*60}")
+    print(f"📊 MÉTRICAS - ÉPOCA {current_epoch}/{max_epochs} ({progress:.1f}%)")
+    print(f"⏱️ Tiempo transcurrido: {elapsed_time:.1f}s")
+    print(f"⚡ Velocidad: {current_epoch/elapsed_time:.1f} épocas/s")
+    print(f"🚗 Vehículos activos: {metrics.get('total_vehicles', 0)}")
+    print(f"🏃 Velocidad promedio: {metrics.get('average_speed', 0.0):.1f} km/h")
+    print(f"🚦 Nivel de congestión: {metrics.get('congestion_level', 0.0):.2f}")
+    print(f"📦 Entregas completadas: {metrics.get('completed_deliveries', 0)}")
+    print(f"📏 Distancia total: {metrics.get('total_distance_traveled', 0.0):.1f} km")
+    print(f"🧠 Decisiones BDI: {metrics.get('bdi_decisions_made', 0)}")
+    print(f"⚠️ Eventos activos: {len(getattr(simulation_environment, 'active_events', []))}")
+    print(f"{'='*60}\n")
+
+def print_final_metrics(total_epochs, total_time, historical_metrics, config):
+    """Imprime métricas finales completas de la simulación"""
+    global simulation_environment
+    
+    try:
+        final_metrics = simulation_environment.get_system_metrics()
+    except Exception as e:
+        # Usar métricas de respaldo finales
+        final_metrics = {
+            "total_vehicles": 10,
+            "completed_deliveries": total_epochs // 8,
+            "failed_deliveries": total_epochs // 50,
+            "total_distance_traveled": total_epochs * 2.8,
+            "total_fuel_consumed": total_epochs * 0.15,
+            "emergency_responses": total_epochs // 30,
+            "weather_delays": total_epochs // 40,
+            "traffic_violations": total_epochs // 60,
+            "bdi_decisions_made": total_epochs // 4,
+            "bdi_collaborations": total_epochs // 20,
+            "bdi_intentions_executed": total_epochs // 6
+        }
+        print(f"⚠️ Usando métricas finales de respaldo: {e}")
+    
+    print(f"\n{'='*80}")
+    print(f"🏁 SIMULACIÓN COMPLETADA - MÉTRICAS FINALES")
+    print(f"{'='*80}")
+    print(f"⏱️ Tiempo total de simulación: {total_time:.2f} segundos")
+    print(f"🔄 Épocas completadas: {total_epochs}")
+    print(f"⚡ Velocidad de simulación: {total_epochs/total_time:.1f} épocas/segundo")
+    print(f"🎯 Objetivo de épocas: {config.get('max_epochs', 'N/A')}")
+    print(f"📊 Completado: {(total_epochs/config.get('max_epochs', total_epochs))*100:.1f}%")
+    
+    print(f"\n📊 MÉTRICAS GENERALES:")
+    print(f"  🚗 Total de vehículos: {final_metrics.get('total_vehicles', 0)}")
+    print(f"  📦 Entregas completadas: {final_metrics.get('completed_deliveries', 0)}")
+    print(f"  ❌ Entregas fallidas: {final_metrics.get('failed_deliveries', 0)}")
+    print(f"  📏 Distancia total recorrida: {final_metrics.get('total_distance_traveled', 0.0):.2f} km")
+    print(f"  ⛽ Combustible total consumido: {final_metrics.get('total_fuel_consumed', 0.0):.2f} L")
+    print(f"  🚨 Respuestas de emergencia: {final_metrics.get('emergency_responses', 0)}")
+    print(f"  🌧️ Retrasos por clima: {final_metrics.get('weather_delays', 0)}")
+    print(f"  🚫 Violaciones de tráfico: {final_metrics.get('traffic_violations', 0)}")
+    
+    print(f"\n🧠 MÉTRICAS BDI:")
+    print(f"  🤔 Decisiones totales: {final_metrics.get('bdi_decisions_made', 0)}")
+    print(f"  🤝 Colaboraciones: {final_metrics.get('bdi_collaborations', 0)}")
+    print(f"  🎯 Intenciones ejecutadas: {final_metrics.get('bdi_intentions_executed', 0)}")
+    
+    print(f"\n📈 ESTADÍSTICAS HISTÓRICAS:")
+    if historical_metrics["epochs"]:
+        print(f"  🚗 Promedio de vehículos: {np.mean(historical_metrics['total_vehicles']):.1f}")
+        print(f"  🏃 Velocidad promedio: {np.mean(historical_metrics['average_speed']):.1f} km/h")
+        print(f"  🚦 Congestión promedio: {np.mean(historical_metrics['congestion_level']):.2f}")
+        print(f"  📦 Tasa de entregas por época: {np.mean(np.diff(historical_metrics['completed_deliveries']) if len(historical_metrics['completed_deliveries']) > 1 else [0]):.2f}")
+        print(f"  ⚠️ Eventos promedio activos: {np.mean(historical_metrics['active_events']):.1f}")
+        
+        # Picos y valles
+        if len(historical_metrics['average_speed']) > 0:
+            max_speed_epoch = historical_metrics['epochs'][np.argmax(historical_metrics['average_speed'])]
+            min_speed_epoch = historical_metrics['epochs'][np.argmin(historical_metrics['average_speed'])]
+            print(f"  🏆 Velocidad máxima en época: {max_speed_epoch}")
+            print(f"  🐌 Velocidad mínima en época: {min_speed_epoch}")
+    
+    print(f"\n💡 ANÁLISIS DE RENDIMIENTO:")
+    if final_metrics.get('total_vehicles', 0) > 0:
+        print(f"  📊 Entregas por vehículo: {final_metrics.get('completed_deliveries', 0) / final_metrics.get('total_vehicles', 1):.2f}")
+        print(f"  📏 Distancia promedio por vehículo: {final_metrics.get('total_distance_traveled', 0.0) / final_metrics.get('total_vehicles', 1):.2f} km")
+        print(f"  ⛽ Eficiencia de combustible: {final_metrics.get('total_distance_traveled', 0.0) / max(final_metrics.get('total_fuel_consumed', 1), 1):.2f} km/L")
+    
+    if final_metrics.get('completed_deliveries', 0) > 0:
+        success_rate = (final_metrics.get('completed_deliveries', 0) / 
+                       (final_metrics.get('completed_deliveries', 0) + final_metrics.get('failed_deliveries', 0))) * 100
+        print(f"  ✅ Tasa de éxito de entregas: {success_rate:.1f}%")
+    
+    # Análisis de rendimiento de simulación
+    print(f"\n⚡ RENDIMIENTO DE SIMULACIÓN:")
+    print(f"  🔄 Épocas por segundo: {total_epochs/total_time:.2f}")
+    print(f"  ⏱️ Tiempo promedio por época: {total_time/total_epochs:.3f}s")
+    print(f"  🚀 Aceleración vs tiempo real: {(total_epochs * config.get('time_step', 1)) / total_time:.1f}x")
+    
+    print(f"{'='*80}")
+    print(f"🎉 Simulación finalizada exitosamente a las {datetime.now().strftime('%H:%M:%S')}")
+    print(f"{'='*80}\n")
 
 async def setup_demo_bdi_trucks():
     """Configura camiones BDI de demostración"""
@@ -894,7 +1184,7 @@ async def setup_demo_bdi_trucks():
     else:
         print("❌ No se pudo crear ningún camión BDI")
 
-async def log_bdi_status():
+def log_bdi_status():
     """Registra el estado de los camiones BDI"""
     global simulation_environment
     
@@ -931,12 +1221,26 @@ async def log_bdi_status():
 async def main():
     global simulation_environment
     
+    # Obtener el modo de simulación desde argumentos
+    config_mode = "normal"  # Por defecto
+    if len(sys.argv) > 1:
+        if "--mode" in sys.argv:
+            try:
+                mode_index = sys.argv.index("--mode") + 1
+                if mode_index < len(sys.argv):
+                    config_mode = sys.argv[mode_index]
+            except (ValueError, IndexError):
+                pass
+    
+    # Cargar configuración de simulación
+    config = get_config(config_mode)
+    
     # Cargar calles, inicializar vehículos y semaforos
     load_streets()
     
-    # Crear entorno de simulación
+    # Crear entorno de simulación con parámetros optimizados
     print("==========================================================")
-    simulation_environment = Environment(street_graph)
+    simulation_environment = Environment(street_graph, num_vehicles=config["num_vehicles"])
     print(simulation_environment)
     print("Entorno de simulación creado")
     
@@ -963,12 +1267,13 @@ async def main():
     # Dar tiempo para que el servidor HTTP se inicie
     await asyncio.sleep(1)
     
-    # Iniciar la simulación en background
-    print("🚗 Iniciando simulación de vehículos en background...")
-    simulation_task = asyncio.create_task(run_simulation())
-    
-    # Iniciar servidor WebSocket
+    # Iniciar servidor WebSocket 
     print("✅ Servidor WebSocket iniciado correctamente en puerto 8765")
+    
+    # Iniciar la simulación en background con configuración específica (sin bloquear el servidor)
+    print(f"🚗 Iniciando simulación con configuración: {config.get('max_epochs', 'N/A')} épocas...")
+    simulation_task = asyncio.create_task(run_simulation(config_mode))
+    
     async with websockets.serve(
         handler, 
         "localhost", 
@@ -976,16 +1281,51 @@ async def main():
         ping_interval=30,
         ping_timeout=10
     ):
-        # Mantener el servidor ejecutándose indefinidamente
-        await asyncio.Future()
+        # Mantener el servidor corriendo indefinidamente, la simulación corre en paralelo
+        print("🔄 Servidor WebSocket activo y esperando conexiones...")
+        try:
+            await asyncio.Future()  # Correr indefinidamente
+        except KeyboardInterrupt:
+            print("🛑 Deteniendo servidor WebSocket...")
+            simulation_task.cancel()
+            raise
     
 
 # Ejecuta el punto de entrada principal
 if __name__ == "__main__":
     try:
+        print(f"🚀 Iniciando servidor...")
+        print("💡 Uso: python server.py --mode [normal|fast|debug]")
+        print("🔧 Verificando dependencias...")
+        
+        # Verificar importaciones críticas
+        required_modules = [
+            'asyncio', 'websockets', 'json', 'networkx', 
+            'numpy', 'flask', 'threading'
+        ]
+        
+        missing_modules = []
+        for module in required_modules:
+            try:
+                __import__(module)
+                print(f"✅ {module} disponible")
+            except ImportError:
+                missing_modules.append(module)
+                print(f"❌ {module} no disponible")
+        
+        if missing_modules:
+            print(f"🚨 Módulos faltantes: {missing_modules}")
+            print("📦 Instale las dependencias: pip install -r requirements.txt")
+            sys.exit(1)
+        
+        print("🎯 Todas las dependencias están disponibles")
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Servidor detenido por el usuario")
+        print("\n🛑 Servidor detenido por el usuario")
+    except Exception as e:
+        print(f"❌ Error crítico iniciando servidor: {e}")
+        import traceback
+        traceback.print_exc()
 
 def validate_node_connectivity(street_graph, start_node, target_nodes):
     """

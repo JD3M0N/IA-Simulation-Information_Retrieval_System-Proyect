@@ -48,7 +48,8 @@ class CivilianTrafficAgent:
         self.metrics = {
             "distance_traveled": 0.0,
             "total_travel_time": 0.0,
-            "stops_count": 0
+            "stops_count": 0,
+            "decisions_made": 0
         }
         
         self.lat = initial_position[0]
@@ -769,9 +770,11 @@ class CivilianTrafficAgent:
                     new_position = (self.lat, self.lon)
                     position_changed = abs(old_position[0] - new_position[0]) > 0.000001 or abs(old_position[1] - new_position[1]) > 0.000001
                     if position_changed:
-                        print(f"🏃‍♂️ {self.agent_id}: MOVIDO de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({new_position[0]:.6f}, {new_position[1]:.6f})")
-                        print(f"   Estado: {self.movement_state.value}, velocidad: {self.current_speed:.1f} km/h, progreso: {self.progress:.3f}")
-                        print(f"   Ruta: {self.current_node} -> {self.next_node}, destino: {self.target_node}")
+                        # Logs detallados comentados para mejorar rendimiento
+                        # print(f"🏃‍♂️ {self.agent_id}: MOVIDO de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({new_position[0]:.6f}, {new_position[1]:.6f})")
+                        # print(f"   Estado: {self.movement_state.value}, velocidad: {self.current_speed:.1f} km/h, progreso: {self.progress:.3f}")
+                        # print(f"   Ruta: {self.current_node} -> {self.next_node}, destino: {self.target_node}")
+                        pass
             
             # Comunicar estado si hay cambios significativos
             if decision.get("signal_intentions", True):
@@ -809,7 +812,8 @@ class CivilianTrafficAgent:
     async def _request_route_change(self, reason: str):
         """Solicita cambio de ruta al sistema"""
         # Communication manager disabled - route change request skipped
-        print(f"🔄 Vehicle {self.agent_id} would request route change: {reason}")
+        # Log comentado para mejorar rendimiento
+        # print(f"🔄 Vehicle {self.agent_id} would request route change: {reason}")
         self.route_changes += 1
     
     async def _request_new_destination(self):
@@ -818,7 +822,8 @@ class CivilianTrafficAgent:
         await self._assign_random_destination()
         
         # Communication manager disabled - destination notification skipped
-        print(f"🎯 Vehicle {self.agent_id} assigned new destination: node {self.target_node}")
+        # Log comentado para mejorar rendimiento
+        # print(f"🎯 Vehicle {self.agent_id} assigned new destination: node {self.target_node}")
     
     async def _execute_emergency_stop(self):
         """Ejecuta parada de emergencia"""
@@ -826,7 +831,8 @@ class CivilianTrafficAgent:
         self.movement_state = MovementState.EMERGENCY_STOP
         
         # Communication manager disabled - emergency notification skipped
-        print(f"🚨 Vehicle {self.agent_id} emergency stop at ({self.lat:.6f}, {self.lon:.6f})")
+        # Log de emergencia comentado (mantener solo si es crítico)
+        # print(f"🚨 Vehicle {self.agent_id} emergency stop at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _yield_way(self):
         """Cede el paso a vehículos prioritarios"""
@@ -834,7 +840,8 @@ class CivilianTrafficAgent:
         self.movement_state = MovementState.WAITING
         
         # Communication manager disabled - yield notification skipped
-        print(f"⚠️ Vehicle {self.agent_id} yielding way at ({self.lat:.6f}, {self.lon:.6f})")
+        # Log comentado para mejorar rendimiento
+        # print(f"⚠️ Vehicle {self.agent_id} yielding way at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _slow_down(self):
         """Reduce la velocidad gradualmente"""
@@ -975,9 +982,9 @@ class CivilianTrafficAgent:
                 self.position = (self.lat, self.lon)
                 self.update_position(self.position)
                 
-                # Debug para el primer vehículo
-                if self.agent_id == 'vehicle0' and abs(old_position[0] - self.lat) > 0.000001:
-                    print(f"🚗 {self.agent_id}: Movido de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({self.lat:.6f}, {self.lon:.6f}), progreso: {progress_clamped:.3f}")
+                # Debug comentado para mejorar rendimiento
+                # if self.agent_id == 'vehicle0' and abs(old_position[0] - self.lat) > 0.000001:
+                #     print(f"🚗 {self.agent_id}: Movido de ({old_position[0]:.6f}, {old_position[1]:.6f}) a ({self.lat:.6f}, {self.lon:.6f}), progreso: {progress_clamped:.3f}")
                 
             elif hasattr(self, '_street_graph') and self._street_graph:
                 # Usar grafo alternativo si está disponible
@@ -1070,7 +1077,8 @@ class CivilianTrafficAgent:
             self.total_travel_time += travel_time
         
         # Communication manager disabled - arrival notification skipped
-        print(f"🎯 Vehicle {self.agent_id} reached destination at ({self.lat:.6f}, {self.lon:.6f})")
+        # Log comentado para mejorar rendimiento
+        # print(f"🎯 Vehicle {self.agent_id} reached destination at ({self.lat:.6f}, {self.lon:.6f})")
     
     async def _communicate_intentions(self, decision: Dict[str, Any]):
         """Comunica intenciones a otros agentes"""
@@ -1172,12 +1180,14 @@ class CivilianTrafficAgent:
         perception = await self.perceive(environment_state)
         decision = await self.decide(perception)
         if await self.act(decision):
-            # Debug específico para el primer vehículo
-            if(self.agent_id == 'vehicle0'):
-                print(f"🚗 {self.agent_id}: pos=({self.lat:.6f}, {self.lon:.6f}), speed={self.current_speed:.1f}, progress={self.progress:.2f}")
-                print(f"   Estado: {self.movement_state.value}, nodo actual: {self.current_node}, siguiente: {self.next_node}")
+            # Debug comentado para mejorar rendimiento
+            # if(self.agent_id == 'vehicle0'):
+            #     print(f"🚗 {self.agent_id}: pos=({self.lat:.6f}, {self.lon:.6f}), speed={self.current_speed:.1f}, progress={self.progress:.2f}")
+            #     print(f"   Estado: {self.movement_state.value}, nodo actual: {self.current_node}, siguiente: {self.next_node}")
+            pass
         else:
-            print(f"❌ No se pudo ejecutar acción para {self.agent_id}")
+            # Solo mantener logs de errores críticos
+            pass  # Comentado también para evitar spam: print(f"❌ No se pudo ejecutar acción para {self.agent_id}")
   
         
 

@@ -134,7 +134,7 @@ class TrafficLight:
 
 class Environment:
 
-    def __init__(self, street_graph: nx.Graph, num_vehicles:int = 20):
+    def __init__(self, street_graph: nx.Graph, num_vehicles:int = 15):  # Reducido de 20 a 15
         """
         Args:
             street_graph: Grafo de NetworkX con la red de calles
@@ -146,8 +146,8 @@ class Environment:
         # Estados principales del entorno
         self.current_time = datetime.now()
         self.simulation_start_time = datetime.now()
-        self.time_step = 1.0  # segundos por paso de simulación
-        self.simulation_speed = 1.0  # Multiplicador de velocidad
+        self.time_step = 3.0  # segundos por paso de simulación (aumentado para mayor velocidad)
+        self.simulation_speed = 3.0  # Multiplicador de velocidad (aumentado)
         
         # Estado del clima
         self.weather_state = WeatherState()
@@ -198,9 +198,9 @@ class Environment:
         
         # Configuración de generadores
         self.weather_generator_config = {
-            "update_interval": 300,  # segundos
+            "update_interval": 900,  # Aumentado frecuencia para reducir overhead (15 min)
             "seasonal_variation": True,
-            "extreme_weather_probability": 0.05
+            "extreme_weather_probability": 0.01  # Reducido probabilidad de eventos extremos
         }
         
         self.traffic_generator_config = {
@@ -209,7 +209,7 @@ class Environment:
             "evening_rush_start": 17,  # 5 PM
             "evening_rush_end": 19,    # 7 PM
             "weekend_traffic_factor": 0.7,
-            "event_probability": 0.02
+            "event_probability": 0.002  # Muy reducido probabilidad de eventos de tráfico
         }
         
         # Inicializar módulos especializados
@@ -336,7 +336,7 @@ class Environment:
                 v.assign_route_and_destination(route, target_node, destination_type)
                 
                 # NUEVO: Inicializar velocidad para que se muevan inmediatamente
-                v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h para movimiento visible
+                v.current_speed = max(v.base_speed * 1.5, 50.0)  # Velocidad más alta para simulación rápida
                 v.movement_state = MovementState.MOVING  # Cambiar estado a movimiento
                 
                 print(f"   🛣️ Ruta calculada: {route[:3]}{'...' if len(route) > 3 else ''} ({len(route)} nodos)")
@@ -352,7 +352,7 @@ class Environment:
                         v.assign_route_and_destination(route, target_node, "local")
                         
                         # NUEVO: Inicializar velocidad para movimiento inmediato
-                        v.current_speed = max(v.base_speed * 0.8, 20.0)  # Al menos 20 km/h
+                        v.current_speed = max(v.base_speed * 1.5, 50.0)  # Velocidad más alta
                         v.movement_state = MovementState.MOVING
                     else:
                         # Si no hay vecinos, crear ruta mínima
@@ -373,13 +373,17 @@ class Environment:
                     # Schedule registration for later when event loop is available
                     self._pending_registrations = getattr(self, '_pending_registrations', [])
                     self._pending_registrations.append(v)
-                    print(f"📝 Programado registro de {vehicle_id} en communication manager")
+                    # Log comentado para mejorar rendimiento
+                    # print(f"📝 Programado registro de {vehicle_id} en communication manager")
                 except Exception as e:
-                    print(f"⚠️ Error preparando registro de {vehicle_id}: {e}")
+                    # Solo logs de errores críticos
+                    # print(f"⚠️ Error preparando registro de {vehicle_id}: {e}")
+                    pass
             
-            print(f"✅ Vehículo {vehicle_id} creado con velocidad {v.current_speed:.1f} km/h, estado: {v.movement_state.value}")
-            print(f"   📍 Posición inicial: ({v.lat:.6f}, {v.lon:.6f}), nodo: {start_node}")
-            print(f"   🎯 Destino: nodo {target_node}, ruta: {len(route)} nodos")
+            # Log comentado para mejorar rendimiento
+            # print(f"✅ Vehículo {vehicle_id} creado con velocidad {v.current_speed:.1f} km/h, estado: {v.movement_state.value}")
+            # print(f"   📍 Posición inicial: ({v.lat:.6f}, {v.lon:.6f}), nodo: {start_node}")
+            # print(f"   🎯 Destino: nodo {target_node}, ruta: {len(route)} nodos")
             
 
     def _initialize_weather(self):
@@ -842,25 +846,32 @@ class Environment:
         self.add_traffic_event(event)
     
     def _update_system_metrics(self):
-        """Actualiza las métricas del sistema"""
-        # Contar vehículos activos
-        active_vehicles = sum(1 for v in self.vehicles.values())
+        """Actualiza las métricas del sistema de forma optimizada"""
+        # Contar vehículos activos (optimizado)
+        active_vehicles = len(self.vehicles)
         self.system_metrics["total_vehicles"] = active_vehicles
         
-        # Contar entregas activas
-        active_deliveries = sum(1 for t in self.delivery_trucks.values() 
-                              if t.is_active and t.current_load > 0)
+        # Contar entregas activas (optimizado)
+        active_deliveries = len([t for t in self.delivery_trucks.values() 
+                               if t.is_active and t.current_load > 0])
         self.system_metrics["active_deliveries"] = active_deliveries
         
-        # Calcular velocidad promedio
-        if active_vehicles > 0:
-            total_speed = sum(v.current_speed for v in self.vehicles.values())
-            self.system_metrics["average_speed"] = total_speed / active_vehicles
+        # Calcular velocidad promedio solo cada 10 pasos para optimizar
+        simulation_time_seconds = (self.current_time - self.simulation_start_time).total_seconds()
+        if int(simulation_time_seconds / self.time_step) % 10 == 0:
+            if active_vehicles > 0:
+                total_speed = sum(v.current_speed for v in self.vehicles.values())
+                self.system_metrics["average_speed"] = total_speed / active_vehicles
         
-        # Calcular nivel de congestión promedio
-        if self.congestion_matrix:
-            total_congestion = sum(self.congestion_matrix.values())
-            self.system_metrics["congestion_level"] = total_congestion / len(self.congestion_matrix)
+        # Calcular nivel de congestión solo cada 15 pasos
+        if int(simulation_time_seconds / self.time_step) % 15 == 0:
+            if self.congestion_matrix:
+                total_congestion = sum(self.congestion_matrix.values())
+                self.system_metrics["congestion_level"] = total_congestion / len(self.congestion_matrix)
+        
+        # Actualizar distancia total recorrida agregada
+        total_distance = sum(getattr(v, 'distance_traveled', 0.0) for v in self.vehicles.values())
+        self.system_metrics["total_distance_traveled"] = total_distance
     
     def _cleanup_expired_events(self):
         """Limpia eventos expirados"""
@@ -1530,3 +1541,33 @@ class Environment:
             return path_length
         except nx.NetworkXNoPath:
             return float('inf')
+    
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """Devuelve las métricas actuales del sistema"""
+        return self.system_metrics.copy()
+    
+    def reset_simulation_metrics(self):
+        """Reinicia las métricas de simulación"""
+        self.system_metrics = {
+            "total_vehicles": len(self.vehicles),
+            "active_deliveries": 0,
+            "average_speed": 0.0,
+            "congestion_level": 0.0,
+            "completed_deliveries": 0,
+            "failed_deliveries": 0,
+            "total_distance_traveled": 0.0,
+            "total_fuel_consumed": 0.0,
+            "emergency_responses": 0,
+            "weather_delays": 0,
+            "traffic_violations": 0,
+            "bdi_decisions_made": 0,
+            "bdi_collaborations": 0,
+            "bdi_intentions_executed": 0
+        }
+        print("🔄 Métricas de simulación reiniciadas")
+    
+    def update_bdi_metrics(self, decisions: int = 0, collaborations: int = 0, intentions: int = 0):
+        """Actualiza las métricas específicas del sistema BDI"""
+        self.system_metrics["bdi_decisions_made"] += decisions
+        self.system_metrics["bdi_collaborations"] += collaborations
+        self.system_metrics["bdi_intentions_executed"] += intentions

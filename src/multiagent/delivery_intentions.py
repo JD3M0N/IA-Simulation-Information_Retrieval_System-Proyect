@@ -57,7 +57,7 @@ class OptimizeFuelConsumptionIntention(Intention):
             )
             agent_context.belief_base.add_belief(fuel_strategy_belief)
             
-            print(f"[{agent_context.agent_id}] Optimizando consumo de combustible")
+            # print(f"[{agent_context.agent_id}] Optimizando consumo de combustible")  # Comentado
             return True
             
         except Exception as e:
@@ -146,7 +146,7 @@ class MinimizeTravelTimeIntention(Intention):
                 max_safe_speed = getattr(agent_context, 'max_speed', 60.0)
                 agent_context.current_speed = min(max_safe_speed, agent_context.current_speed * 1.1)
             
-            print(f"[{agent_context.agent_id}] Minimizando tiempo de viaje")
+            # print(f"[{agent_context.agent_id}] Minimizando tiempo de viaje")  # Comentado
             return True
             
         except Exception as e:
@@ -222,7 +222,7 @@ class MaximizeDeliveriesIntention(Intention):
                         )
                         agent_context.belief_base.add_belief(optimized_belief)
             
-            print(f"[{agent_context.agent_id}] Maximizando entregas")
+            # print(f"[{agent_context.agent_id}] Maximizando entregas")  # Comentado
             return True
             
         except Exception as e:
@@ -317,7 +317,7 @@ class CoordinateWithOthersIntention(Intention):
                 if self._can_collaborate(agent_context, other_agent_info):
                     await self._propose_collaboration(agent_context, other_agent_info)
             
-            print(f"[{agent_context.agent_id}] Coordinando con otros agentes")
+            # print(f"[{agent_context.agent_id}] Coordinando con otros agentes")  # Comentado
             return True
             
         except Exception as e:
@@ -417,8 +417,9 @@ class AvoidTrafficIntention(Intention):
             if traffic_beliefs and hasattr(agent_context, 'street_graph'):
                 traffic_info = traffic_beliefs[0].content
                 congested_areas = traffic_info.get("congested_areas", [])
+                route_changed = False
                 
-                # Intentar evitar áreas congestionadas
+                # Intentar evitar áreas congestionadas solo si hay congestión
                 if hasattr(agent_context, 'route') and congested_areas:
                     current_route = getattr(agent_context, 'route', [])
                     if current_route and len(current_route) > 2:
@@ -442,22 +443,45 @@ class AvoidTrafficIntention(Intention):
                             )
                             
                             if len(alternative_route) <= len(current_route) * 1.2:  # No más del 20% más larga
-                                agent_context.route = alternative_route
-                                
-                                # Actualizar creencia de ruta
-                                route_belief = Belief(
-                                    belief_id="traffic_avoiding_route",
-                                    belief_type=BeliefType.ROUTE_INFO,
-                                    content={"current_route": alternative_route, "traffic_avoided": True}
-                                )
-                                agent_context.belief_base.add_belief(route_belief)
-                                
+                                if alternative_route != current_route:  # Solo si la ruta realmente cambió
+                                    agent_context.route = alternative_route
+                                    route_changed = True
+                                    
+                                    # Actualizar creencia de ruta
+                                    route_belief = Belief(
+                                        belief_id="traffic_avoiding_route",
+                                        belief_type=BeliefType.ROUTE_INFO,
+                                        content={"current_route": alternative_route, "traffic_avoided": True}
+                                    )
+                                    agent_context.belief_base.add_belief(route_belief)
+                                    
                         except nx.NetworkXNoPath:
                             pass
             
-            print(f"[{agent_context.agent_id}] Evitando tráfico")
+            # Solo imprimir si realmente se evitó tráfico o hay actividad relevante
+            if route_changed:
+                print(f"[{agent_context.agent_id}] Evitando tráfico - Ruta recalculada")
+            # Comentado para evitar logs verbosos
+            # else:
+            #     # Determinar estado actual más específico
+            #     current_congestion = 0.0
+            #     if traffic_beliefs:
+            #         traffic_info = traffic_beliefs[0].content
+            #         current_congestion = traffic_info.get("congestion_level", 0.0)
+            #     
+            #     if current_congestion > self.congestion_threshold:
+            #         print(f"[{agent_context.agent_id}] Monitoreando tráfico - Congestión: {current_congestion:.2f}")
+            #     elif hasattr(agent_context, 'route') and agent_context.route:
+            #         # Verificar si tiene entregas pendientes
+            #         if hasattr(agent_context, 'delivery_locations') and agent_context.delivery_locations:
+            #             print(f"[{agent_context.agent_id}] En ruta - {len(agent_context.delivery_locations)} entregas pendientes")
+            #         else:
+            #             print(f"[{agent_context.agent_id}] Patrullando - Ruta activa")
+            #     else:
+            #         print(f"[{agent_context.agent_id}] En espera - Sin ruta asignada")
+            
             return True
             
         except Exception as e:
-            print(f"Error evitando tráfico: {e}")
+            print(f"[{agent_context.agent_id}] Error en análisis de tráfico: {e}")
             return False
