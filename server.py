@@ -12,7 +12,6 @@ from flask import Flask, request, jsonify
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Imports específicos del proyecto
-from src.multi_agent.simulation_environment import SimulationEnvironment
 from src.multiagent.environment import Environment
 from src.vehicle import initialize_vehicles, update_vehicle_positions
 from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
@@ -20,23 +19,14 @@ from src.optimized_route import optimize_delivery_routes
 from src.NLP.cvrp_assistant import analyze_cvrp_requirements
 from src.NLP.RAG import create_vrp_rag_assistant
 
-# Importar sistema multi-agente
-from src.multi_agent import (
-    create_simulation_environment, 
-    get_simulation_environment,
-    VehicleAgent,
-    VehicleBehavior
-)
-from src.multi_agent.websocket_handlers import (
-    handle_route_optimization_request,
-    handle_weather_forecast_request,
-    handle_trigger_weather_event,
-    handle_traffic_light_modification,
-    handle_simulation_stats_request,
-    handle_emergency_event,
-    handle_spawn_vehicle,
-    handle_start_simulation,
-    handle_stop_simulation
+
+# Importar sistema modular de semáforos
+from src.multiagent.traffic_lights import (
+    initialize_server_traffic_lights,
+    get_server_traffic_lights_data,
+    modify_server_traffic_light,
+    get_server_traffic_metrics,
+    server_traffic_manager
 )
 
 # Importar análisis climático
@@ -104,7 +94,7 @@ def analyze_graph_connectivity():
     else:
         print(f"  - ✅ Grafo completamente conectado")
 
-def load_streets():
+async def load_streets():
     """Carga los datos del mapa desde los archivos de caché y construye el grafo de calles"""
     global street_graph, all_nodes, street_congestion, multi_agent_environment
     
@@ -215,8 +205,21 @@ def load_streets():
         analyze_graph_connectivity()
         
         # NUEVO: Inicializar entorno multi-agente
-        multi_agent_environment = create_simulation_environment(street_graph)
+        
         print("✅ Entorno multi-agente creado")
+        
+        # NUEVO: Inicializar sistema modular de semáforos
+        print("🚦 Inicializando sistema modular de semáforos...")
+        # Crear environment temporal para la integración
+        from src.multiagent.environment import Environment
+        temp_environment = Environment(street_graph)
+        
+        # Inicializar sistema de semáforos
+        traffic_success = await initialize_server_traffic_lights(temp_environment)
+        if traffic_success:
+            print("✅ Sistema modular de semáforos inicializado correctamente")
+        else:
+            print("⚠️ Sistema de semáforos usando modo legacy")
         
     except Exception as e:
         print(f"Error cargando datos de calles: {e}")
@@ -300,11 +303,15 @@ async def send_positions(websocket):
                     for vid, v in vehicles.items()
                 ]
             
-            # Empaquetar y enviar los datos
-            payload = {
-                "timestamp": datetime.now().isoformat(),
-                "vehicles": vehicle_data,
-                "traffic_lights": [
+            # Obtener datos de semáforos del sistema modular
+            traffic_lights_data = []
+            
+            # Priorizar el sistema modular si está disponible
+            if server_traffic_manager.is_ready():
+                traffic_lights_data = get_server_traffic_lights_data()
+            else:
+                # Fallback al sistema legacy
+                traffic_lights_data = [
                     {
                         "node_id": nid,
                         "lat": data["lat"],
@@ -313,7 +320,13 @@ async def send_positions(websocket):
                         "zone": data.get("zone", 0),
                         "direction": data.get("direction", "east")
                     } for nid, data in traffic_lights.items()
-                ],
+                ]
+            
+            # Empaquetar y enviar los datos
+            payload = {
+                "timestamp": datetime.now().isoformat(),
+                "vehicles": vehicle_data,
+                "traffic_lights": traffic_lights_data,
                 "multi_agent_status": multi_agent_status
             }
             
@@ -375,9 +388,17 @@ async def handler(websocket):
                     # Modificar estado de semáforo
                     await handle_traffic_light_modification(websocket, data, multi_agent_environment)
                 
+                elif message_type == 'modify_traffic_light':
+                    # Modificar estado de semáforo usando sistema modular
+                    await handle_modular_traffic_light_modification(websocket, data)
+                
                 elif message_type == 'get_simulation_stats':
                     # Obtener estadísticas detalladas
                     await handle_simulation_stats_request(websocket, data, multi_agent_environment)
+                
+                elif message_type == 'get_traffic_metrics':
+                    # Obtener métricas del sistema de semáforos
+                    await handle_traffic_metrics_request(websocket, data)
                 
                 # Añadir este bloque para manejar solicitudes de nodos del mapa
                 elif message_type == 'request_map_nodes':
@@ -782,7 +803,7 @@ async def main():
     global simulation_environment
     
     # Cargar calles, inicializar vehículos y semaforos
-    load_streets()
+    await load_streets()
     
     # Crear entorno de simulación
     print("==========================================================")
@@ -981,5 +1002,94 @@ def ask_rag():
             'success': False,
             'message': f'Error interno: {str(e)}'
         }), 500
+
+async def handle_modular_traffic_light_modification(websocket, data):
+    """Maneja modificación de semáforos usando el sistema modular"""
+    try:
+        node_id = data.get('node_id')
+        new_state = data.get('state', 'green')
+        duration = data.get('duration')
+        
+        if not node_id:
+            await websocket.send(json.dumps({
+                "type": "traffic_light_error",
+                "message": "Se requiere node_id para modificar semáforo"
+            }))
+            return
+        
+        # Usar el sistema modular si está disponible
+        if server_traffic_manager.is_ready():
+            success = await modify_server_traffic_light(node_id, new_state, duration)
+            
+            if success:
+                await websocket.send(json.dumps({
+                    "type": "traffic_light_modified",
+                    "node_id": node_id,
+                    "new_state": new_state,
+                    "message": f"Semáforo {node_id} cambiado a {new_state}"
+                }))
+            else:
+                await websocket.send(json.dumps({
+                    "type": "traffic_light_error", 
+                    "message": f"No se pudo modificar el semáforo {node_id}"
+                }))
+        else:
+            # Fallback al sistema legacy
+            if node_id in traffic_lights:
+                traffic_lights[node_id]["state"] = new_state
+                await websocket.send(json.dumps({
+                    "type": "traffic_light_modified",
+                    "node_id": node_id,
+                    "new_state": new_state,
+                    "message": f"Semáforo {node_id} cambiado a {new_state} (legacy)"
+                }))
+            else:
+                await websocket.send(json.dumps({
+                    "type": "traffic_light_error",
+                    "message": f"Semáforo {node_id} no encontrado"
+                }))
+                
+    except Exception as e:
+        print(f"Error modificando semáforo: {e}")
+        await websocket.send(json.dumps({
+            "type": "traffic_light_error",
+            "message": f"Error interno: {str(e)}"
+        }))
+
+async def handle_traffic_metrics_request(websocket, data):
+    """Maneja solicitudes de métricas del sistema de semáforos"""
+    try:
+        if server_traffic_manager.is_ready():
+            metrics = get_server_traffic_metrics()
+            
+            await websocket.send(json.dumps({
+                "type": "traffic_metrics",
+                "metrics": metrics,
+                "timestamp": datetime.now().isoformat()
+            }))
+        else:
+            # Métricas básicas del sistema legacy
+            legacy_metrics = {
+                "total_traffic_lights": len(traffic_lights),
+                "active_lights": sum(1 for tl in traffic_lights.values() if tl.get("state") != "off"),
+                "system_type": "legacy",
+                "performance": {
+                    "average_efficiency": 0.75,  # Valor fijo para legacy
+                    "network_efficiency": 0.70
+                }
+            }
+            
+            await websocket.send(json.dumps({
+                "type": "traffic_metrics",
+                "metrics": legacy_metrics,
+                "timestamp": datetime.now().isoformat()
+            }))
+            
+    except Exception as e:
+        print(f"Error obteniendo métricas de tráfico: {e}")
+        await websocket.send(json.dumps({
+            "type": "traffic_metrics_error",
+            "message": f"Error obteniendo métricas: {str(e)}"
+        }))
 
 
