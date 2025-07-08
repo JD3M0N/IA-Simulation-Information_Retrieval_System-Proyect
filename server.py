@@ -317,6 +317,47 @@ async def send_positions(websocket):
                 "multi_agent_status": multi_agent_status
             }
             
+            # Añadir datos de agentes BDI si están disponibles
+            if simulation_environment:
+                try:
+                    bdi_status = simulation_environment.get_bdi_trucks_status()
+                    if bdi_status:
+                        # Convertir agentes BDI a formato de vehículos para el cliente
+                        bdi_vehicles = []
+                        for truck_id, status in bdi_status.items():
+                            if "error" not in status:
+                                position = status.get("position", {})
+                                if position.get("lat") and position.get("lon"):
+                                    bdi_vehicle = {
+                                        "id": truck_id,
+                                        "lat": position["lat"],
+                                        "lon": position["lon"],
+                                        "type": "bdi_truck",
+                                        "speed": status.get("current_speed", 0),
+                                        "fuel_level": status.get("fuel_level", 0),
+                                        "current_load": status.get("current_load", 0),
+                                        "deliveries_completed": status.get("metrics", {}).get("deliveries_completed", 0),
+                                        "state": "delivering" if status.get("delivery_locations", []) else "idle"
+                                    }
+                                    bdi_vehicles.append(bdi_vehicle)
+                        
+                        # Añadir vehículos BDI a la lista principal
+                        payload["vehicles"].extend(bdi_vehicles)
+                        
+                        # Añadir estadísticas BDI específicas
+                        payload["bdi_status"] = {
+                            "total_bdi_trucks": len(bdi_status),
+                            "active_bdi_trucks": len(bdi_vehicles),
+                            "total_deliveries": sum(
+                                status.get("metrics", {}).get("deliveries_completed", 0) 
+                                for status in bdi_status.values() if "error" not in status
+                            ),
+                            "communication_stats": simulation_environment.get_communication_stats()
+                        }
+                except Exception as e:
+                    # No hacer nada si hay error, solo continuar
+                    pass
+            
             await websocket.send(json.dumps(payload))
             await asyncio.sleep(0.05)  # Actualización muy frecuente para movimiento fluido (20 FPS)
         except websockets.exceptions.ConnectionClosed:
@@ -759,23 +800,132 @@ async def run_simulation():
         return
     
     print("🚗 Iniciando simulación de vehículos en background...")
+    
+    # Crear algunos camiones BDI de demostración
+    await setup_demo_bdi_trucks()
+    
     step_count = 0
     
     while True:
         try:
+            # Actualizar el entorno básico
             await simulation_environment.step()
+            
+            # Actualizar los camiones BDI específicamente
+            await simulation_environment.update_bdi_trucks(1.0)  # delta_time = 1 segundo
+            
             step_count += 1
             
             # Log cada 50 pasos para no saturar la consola
             if step_count % 50 == 0:
                 print(f"📊 Simulación: {step_count} pasos completados")
+                # Mostrar estado de camiones BDI ocasionalmente
+                if step_count % 200 == 0:  # Cada 200 pasos (~ 4 segundos)
+                    await log_bdi_status()
             
             # Pausa entre pasos para controlar la velocidad de simulación
-            await asyncio.sleep(0.02)  # Reducido de 0.05 a 0.02 para movimiento más fluido (50 FPS)
+            await asyncio.sleep(0.02)  # 50 FPS
             
         except Exception as e:
             print(f"❌ Error en simulación: {e}")
             await asyncio.sleep(1)
+
+async def setup_demo_bdi_trucks():
+    """Configura camiones BDI de demostración"""
+    global simulation_environment
+    
+    if not simulation_environment:
+        return
+    
+    print("🚛 Configurando camiones BDI de demostración...")
+    
+    # Obtener nodos disponibles
+    nodes = list(simulation_environment.street_graph.nodes())
+    if len(nodes) < 10:
+        print("⚠️ Pocos nodos disponibles para demostración BDI")
+        return
+    
+    # Configuraciones de camiones
+    truck_configs = [
+        {
+            "id": "bdi_truck_alpha",
+            "start_node": random.choice(nodes),
+            "capacity": 1000,
+            "deliveries": random.sample(nodes, min(5, len(nodes)//10))
+        },
+        {
+            "id": "bdi_truck_beta", 
+            "start_node": random.choice(nodes),
+            "capacity": 1200,
+            "deliveries": random.sample(nodes, min(6, len(nodes)//10))
+        },
+        {
+            "id": "bdi_truck_gamma",
+            "start_node": random.choice(nodes),
+            "capacity": 800,
+            "deliveries": random.sample(nodes, min(4, len(nodes)//10))
+        }
+    ]
+    
+    # Crear camiones BDI
+    created_count = 0
+    for config in truck_configs:
+        success = simulation_environment.add_bdi_delivery_truck(
+            truck_id=config["id"],
+            start_node=config["start_node"],
+            capacity=config["capacity"],
+            delivery_locations=config["deliveries"]
+        )
+        
+        if success:
+            created_count += 1
+            print(f"✅ {config['id']} creado en nodo {config['start_node']}")
+        else:
+            print(f"❌ Error creando {config['id']}")
+    
+    if created_count > 0:
+        # Iniciar sistema de comunicación BDI
+        await simulation_environment.start_communication_system()
+        
+        # Iniciar movimiento de camiones
+        simulation_environment.start_bdi_trucks_movement()
+        
+        print(f"✅ Sistema BDI iniciado con {created_count} camiones")
+    else:
+        print("❌ No se pudo crear ningún camión BDI")
+
+async def log_bdi_status():
+    """Registra el estado de los camiones BDI"""
+    global simulation_environment
+    
+    if not simulation_environment:
+        return
+    
+    try:
+        bdi_status = simulation_environment.get_bdi_trucks_status()
+        
+        if bdi_status:
+            print(f"\n📊 Estado BDI ({len(bdi_status)} camiones):")
+            for truck_id, status in bdi_status.items():
+                if "error" in status:
+                    print(f"❌ {truck_id}: {status['error']}")
+                    continue
+                
+                metrics = status.get("metrics", {})
+                print(f"🚛 {truck_id}: Nodo {status.get('current_node', 'N/A')}, "
+                      f"Entregas: {metrics.get('deliveries_completed', 0)}, "
+                      f"Combustible: {status.get('fuel_level', 0):.1f}%")
+            
+            # Mostrar estadísticas de comunicación
+            comm_stats = simulation_environment.get_communication_stats()
+            if "error" not in comm_stats:
+                stats = comm_stats.get('stats', {})
+                print(f"📡 Comunicación: {stats.get('messages_sent', 0)} enviados, "
+                      f"{stats.get('messages_delivered', 0)} entregados")
+            print()
+        
+    except Exception as e:
+        print(f"❌ Error obteniendo estado BDI: {e}")
 
 # Modificar la función main para incluir el servidor HTTP
 async def main():

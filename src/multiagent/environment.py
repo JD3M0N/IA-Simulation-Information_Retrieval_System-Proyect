@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from src.multiagent.civilian_traffic import CivilianTrafficAgent
-from src.multiagent.Civilian_enums import *
-from src.multiagent.Environment_enums import *
+from .civilian_traffic import CivilianTrafficAgent
+from .Civilian_enums import *
+from .Environment_enums import *
 
 # Imports
 sys.path.append("src")
@@ -22,11 +22,15 @@ sys.path.append("src/traffic_events")
 sys.path.append("src/crawler")
 sys.path.append("src/multi_agent")
 
+# BDI System imports
+from .delivery_truck_bdi import DeliveryTruckBDI
+from .communication_system import communication_manager
+
 # Import communication manager - DISABLED
 try:
     # from src.multi_agent.communication import communication_manager
-    COMMUNICATION_AVAILABLE = False
-    print("Communication manager disabled - using standalone simulation")
+    COMMUNICATION_AVAILABLE = True  # Habilitar comunicación BDI
+    print("Communication manager BDI enabled")
 except ImportError as e:
     print(f"Advertencia: Communication manager no disponible: {e}")
     COMMUNICATION_AVAILABLE = False
@@ -152,7 +156,10 @@ class Environment:
         # Vehículos en el sistema
         self.vehicles: Dict[str, CivilianTrafficAgent] = {}
         self.delivery_trucks: Dict[str, VehicleState] = {}
-        self.civilian_traffic: Dict[str, VehicleState] = {}
+        # self.civilian_traffic: Dict[str, VehicleState] = {}
+        
+        # BDI Delivery Trucks - NUEVO SISTEMA
+        self.bdi_delivery_trucks: Dict[str, DeliveryTruckBDI] = {}
         
         # Estado de la red vial
         self.road_segments: Dict[Tuple[int, int], RoadSegment] = {}
@@ -175,7 +182,11 @@ class Environment:
             "total_fuel_consumed": 0.0,
             "emergency_responses": 0,
             "weather_delays": 0,
-            "traffic_violations": 0
+            "traffic_violations": 0,
+            # Nuevas métricas BDI
+            "bdi_decisions_made": 0,
+            "bdi_collaborations": 0,
+            "bdi_intentions_executed": 0
         }
         
         # Zonas especiales
@@ -213,6 +224,10 @@ class Environment:
         
         # Inicializar el entorno
         self._initialize_environment()
+        
+        # Inicializar sistema de comunicación BDI
+        if COMMUNICATION_AVAILABLE:
+            self.communication_task = None
     
     def _initialize_environment(self):
         # Inicializar segmentos de carretera
@@ -640,6 +655,24 @@ class Environment:
                 "maintenance_needed": t.maintenance_needed
             } for tid, t in self.delivery_trucks.items()},
             
+            # Camiones BDI - NUEVO SISTEMA
+            "bdi_delivery_trucks": {tid: {
+                "agent_id": t.agent_id,
+                "current_node": t.current_node,
+                "lat": t.lat,
+                "lon": t.lon,
+                "speed": t.current_speed,
+                "capacity": t.capacity,
+                "current_load": t.current_load,
+                "fuel_level": t.fuel_level,
+                "route": t.route,
+                "delivery_locations": t.delivery_locations,
+                "completed_deliveries": t.completed_deliveries,
+                "progress": t.progress,
+                "bdi_status": t.get_status(),
+                "delivery_metrics": t.delivery_metrics
+            } for tid, t in self.bdi_delivery_trucks.items()},
+            
             # Estado de la red vial
             "road_network": {
                 "congestion": self.congestion_matrix,
@@ -995,6 +1028,7 @@ class Environment:
             "simulation_time": (self.current_time - self.simulation_start_time).total_seconds(),
             "total_vehicles": len(self.vehicles),
             "total_delivery_trucks": len(self.delivery_trucks),
+            "total_bdi_trucks": len(self.bdi_delivery_trucks),
             "total_road_segments": len(self.road_segments),
             "total_traffic_lights": len(self.traffic_lights),
             "active_events": len(self.active_events),
@@ -1003,3 +1037,496 @@ class Environment:
             "active_traffic_violations": sum(v.traffic_violations for v in self.vehicles.values()),
             "emergency_responses": sum(v.emergency_responses for v in self.vehicles.values())
         }
+    
+    def add_bdi_delivery_truck(self, truck_id: str, start_node: int,
+                              capacity: int = 1000, delivery_locations: List[int] = None) -> bool:
+        """
+        Añade un camión de reparto BDI al sistema
+        
+        Args:
+            truck_id: ID único del camión
+            start_node: Nodo de inicio
+            capacity: Capacidad en kg
+            delivery_locations: Lista de ubicaciones de entrega
+            
+        Returns:
+            bool: True si se añadió exitosamente
+        """
+        if truck_id in self.bdi_delivery_trucks:
+            return False
+        
+        try:
+            # Crear camión BDI
+            truck = DeliveryTruckBDI(
+                agent_id=truck_id,
+                initial_node=start_node,
+                capacity=capacity
+            )
+            
+            # Configurar entorno y grafo
+            truck.set_environment_reference(self, self.street_graph)
+            
+            # Asignar ubicaciones de entrega si se proporcionan
+            if delivery_locations:
+                truck.assign_delivery_route(delivery_locations)
+            
+            # Registrar en el sistema de comunicación
+            if COMMUNICATION_AVAILABLE:
+                communication_manager.register_agent(truck)
+            
+            # Añadir al entorno
+            self.bdi_delivery_trucks[truck_id] = truck
+            self.system_metrics["total_vehicles"] += 1
+            self.system_metrics["active_deliveries"] += 1
+            
+            print(f"✅ Camión BDI {truck_id} añadido en nodo {start_node}")
+            return True
+            
+        except Exception as e:
+            print(f"Error añadiendo camión BDI {truck_id}: {e}")
+            return False
+    
+    def remove_bdi_delivery_truck(self, truck_id: str) -> bool:
+        """Remueve un camión BDI del sistema"""
+        if truck_id not in self.bdi_delivery_trucks:
+            return False
+        
+        try:
+            # Desregistrar de comunicación
+            if COMMUNICATION_AVAILABLE:
+                communication_manager.unregister_agent(truck_id)
+            
+            # Remover del entorno
+            del self.bdi_delivery_trucks[truck_id]
+            self.system_metrics["total_vehicles"] -= 1
+            self.system_metrics["active_deliveries"] -= 1
+            
+            print(f"Camión BDI {truck_id} removido del sistema")
+            return True
+            
+        except Exception as e:
+            print(f"Error removiendo camión BDI {truck_id}: {e}")
+            return False
+    
+    async def update_bdi_trucks(self, delta_time: float):
+        """Actualiza todos los camiones BDI"""
+        try:
+            # Obtener estado del entorno para los agentes BDI
+            env_state = self.get_environment_state()
+            
+            # Procesar cada camión BDI
+            for truck_id, truck in self.bdi_delivery_trucks.items():
+                try:
+                    # Ejecutar ciclo BDI
+                    await truck.bdi_cycle(env_state)
+                    
+                    # Actualizar posición física
+                    truck.update_position(delta_time)
+                    
+                    # Actualizar métricas del sistema
+                    truck_metrics = truck.metrics
+                    self.system_metrics["bdi_decisions_made"] += truck_metrics.get("decisions_made", 0)
+                    self.system_metrics["bdi_intentions_executed"] += truck_metrics.get("intentions_executed", 0)
+                    
+                    # Resetear métricas del camión para evitar acumulación
+                    truck.metrics["decisions_made"] = 0
+                    truck.metrics["intentions_executed"] = 0
+                    
+                except Exception as e:
+                    print(f"Error actualizando camión BDI {truck_id}: {e}")
+            
+            # Procesar comunicación entre agentes
+            if COMMUNICATION_AVAILABLE:
+                for truck in self.bdi_delivery_trucks.values():
+                    communication_manager.process_agent_messages(truck.agent_id)
+                    
+        except Exception as e:
+            print(f"Error en actualización de camiones BDI: {e}")
+    
+    def get_bdi_trucks_status(self) -> Dict[str, Any]:
+        """Obtiene el estado de todos los camiones BDI"""
+        status = {}
+        
+        for truck_id, truck in self.bdi_delivery_trucks.items():
+            try:
+                status[truck_id] = truck.get_delivery_status()
+            except Exception as e:
+                status[truck_id] = {"error": str(e)}
+        
+        return status
+    
+    def start_bdi_trucks_movement(self):
+        """Inicia el movimiento de todos los camiones BDI"""
+        for truck in self.bdi_delivery_trucks.values():
+            try:
+                truck.start_movement()
+            except Exception as e:
+                print(f"Error iniciando movimiento de {truck.agent_id}: {e}")
+    
+    async def start_communication_system(self):
+        """Inicia el sistema de comunicación BDI"""
+        if COMMUNICATION_AVAILABLE and self.communication_task is None:
+            self.communication_task = asyncio.create_task(communication_manager.communication_loop())
+            print("✅ Sistema de comunicación BDI iniciado")
+    
+    async def stop_communication_system(self):
+        """Detiene el sistema de comunicación BDI"""
+        if COMMUNICATION_AVAILABLE and self.communication_task:
+            communication_manager.is_active = False
+            self.communication_task.cancel()
+            try:
+                await self.communication_task
+            except asyncio.CancelledError:
+                pass
+            self.communication_task = None
+            print("Sistema de comunicación BDI detenido")
+    
+    def get_communication_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas del sistema de comunicación"""
+        if COMMUNICATION_AVAILABLE:
+            return communication_manager.get_communication_stats()
+        return {"error": "Communication system not available"}
+
+    def execute_bdi_agent_action(self, agent_id: str, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Ejecuta una acción solicitada por un agente BDI"""
+        if agent_id not in self.bdi_delivery_trucks:
+            return {"success": False, "error": f"Agent {agent_id} not found"}
+        
+        agent = self.bdi_delivery_trucks[agent_id]
+        action_type = action.get("type", "")
+        
+        try:
+            if action_type == "change_route":
+                return self._execute_route_change(agent, action)
+            elif action_type == "adjust_speed":
+                return self._execute_speed_adjustment(agent, action)
+            elif action_type == "emergency_stop":
+                return self._execute_emergency_stop(agent, action)
+            else:
+                return {"success": False, "error": f"Unknown action type: {action_type}"}
+        except Exception as e:
+            return {"success": False, "error": f"Action execution failed: {str(e)}"}
+
+    def _execute_route_change(self, agent, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Ejecuta cambio de ruta"""
+        new_route = action.get("new_route", [])
+        if not new_route:
+            return {"success": False, "error": "No route provided"}
+        
+        old_route = agent.route.copy()
+        agent.route = new_route
+        agent.next_node = new_route[1] if len(new_route) > 1 else None
+        agent.progress = 0.0
+        self.system_metrics["bdi_decisions_made"] += 1
+        
+        return {"success": True, "message": "Route changed", 
+                "old_route_length": len(old_route), 
+                "new_route_length": len(new_route)}
+
+    def _execute_speed_adjustment(self, agent, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Ejecuta ajuste de velocidad"""
+        target_speed = action.get("target_speed", agent.base_speed)
+        target_speed = max(10.0, min(target_speed, agent.max_speed))
+        
+        old_speed = agent.current_speed
+        agent.current_speed = target_speed
+        
+        return {"success": True, "message": "Speed adjusted",
+                "old_speed": old_speed, "new_speed": target_speed}
+
+    def _execute_emergency_stop(self, agent, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Ejecuta parada de emergencia"""
+        agent.current_speed = 0.0
+        agent.emergency_priority = True
+        self.system_metrics["emergency_responses"] += 1
+        
+        return {"success": True, "message": "Emergency stop executed"}
+    
+    # BDI Agent Integration Methods
+    
+    def get_bdi_agent_perception(self, agent_id: str, perception_range: float = 1000.0) -> Dict[str, Any]:
+        """
+        Proporciona información del entorno para un agente BDI específico
+        
+        Args:
+            agent_id: ID del agente BDI
+            perception_range: Rango de percepción en metros
+            
+        Returns:
+            Dict con información percibida del entorno
+        """
+        if agent_id not in self.bdi_delivery_trucks:
+            return {"error": f"Agent {agent_id} not found"}
+        
+        agent = self.bdi_delivery_trucks[agent_id]
+        
+        # Información básica del entorno
+        perception = {
+            "timestamp": self.current_time.isoformat(),
+            "agent_position": {
+                "current_node": agent.current_node,
+                "next_node": agent.next_node,
+                "lat": agent.lat,
+                "lon": agent.lon,
+                "progress": agent.progress
+            },
+            "weather": {
+                "condition": self.weather_state.condition.value,
+                "temperature": self.weather_state.temperature,
+                "visibility": self.weather_state.visibility,
+                "precipitation": self.weather_state.precipitation,
+                "wind_speed": self.weather_state.wind_speed
+            },
+            "traffic_conditions": self._get_local_traffic_info(agent.current_node, perception_range),
+            "nearby_agents": self._get_nearby_bdi_agents(agent_id, perception_range),
+            "road_conditions": self._get_road_conditions(agent.current_node, agent.next_node),
+            "traffic_lights": self._get_nearby_traffic_lights(agent.current_node, perception_range),
+            "emergency_events": self._get_nearby_emergency_events(agent.current_node, perception_range),
+            "delivery_opportunities": self._get_delivery_opportunities(agent_id),
+            "fuel_stations": self._get_nearby_fuel_stations(agent.current_node, perception_range),
+            "congestion_forecast": self._get_congestion_forecast(agent.current_node)
+        }
+        
+        return perception
+    
+    def _get_local_traffic_info(self, node: int, range_meters: float) -> Dict[str, Any]:
+        """Obtiene información de tráfico local"""
+        traffic_info = {
+            "congestion_level": 0.0,
+            "average_speed": 0.0,
+            "vehicle_count": 0,
+            "affected_routes": []
+        }
+        
+        # Analizar congestión en nodos cercanos
+        if node in self.street_graph.nodes:
+            neighbors = list(self.street_graph.neighbors(node))
+            total_congestion = 0.0
+            total_vehicles = 0
+            
+            for neighbor in neighbors:
+                edge = (node, neighbor)
+                if edge in self.congestion_matrix:
+                    congestion = self.congestion_matrix[edge]
+                    total_congestion += congestion
+                    
+                if edge in self.road_segments:
+                    total_vehicles += self.road_segments[edge].current_vehicles
+            
+            if neighbors:
+                traffic_info["congestion_level"] = total_congestion / len(neighbors)
+                traffic_info["vehicle_count"] = total_vehicles
+                traffic_info["average_speed"] = 50.0 * (1.0 - traffic_info["congestion_level"])
+        
+        return traffic_info
+    
+    def _get_nearby_bdi_agents(self, agent_id: str, range_meters: float) -> List[Dict[str, Any]]:
+        """Obtiene información de otros agentes BDI cercanos"""
+        nearby_agents = []
+        
+        if agent_id not in self.bdi_delivery_trucks:
+            return nearby_agents
+        
+        current_agent = self.bdi_delivery_trucks[agent_id]
+        
+        for other_id, other_agent in self.bdi_delivery_trucks.items():
+            if other_id == agent_id:
+                continue
+            
+            # Calcular distancia aproximada (simplificada)
+            distance = self._calculate_node_distance(
+                current_agent.current_node, 
+                other_agent.current_node
+            )
+            
+            if distance <= range_meters / 1000.0:  # Convertir a km
+                agent_info = {
+                    "agent_id": other_id,
+                    "distance_km": distance,
+                    "current_node": other_agent.current_node,
+                    "speed": other_agent.current_speed,
+                    "fuel_level": other_agent.fuel_level,
+                    "current_load": other_agent.current_load,
+                    "delivery_count": len(other_agent.completed_deliveries),
+                    "available_for_collaboration": other_agent.fuel_level > 20.0 and other_agent.current_load < other_agent.capacity * 0.8
+                }
+                nearby_agents.append(agent_info)
+        
+        return nearby_agents
+    
+    def _get_road_conditions(self, current_node: int, next_node: Optional[int]) -> Dict[str, Any]:
+        """Obtiene condiciones de la carretera actual"""
+        road_info = {
+            "current_segment": None,
+            "next_segment": None,
+            "surface_conditions": "good",
+            "weather_impact": 1.0,
+            "construction": False,
+            "speed_limit": 50.0
+        }
+        
+        if next_node and (current_node, next_node) in self.road_segments:
+            segment = self.road_segments[(current_node, next_node)]
+            road_info["current_segment"] = {
+                "road_type": segment.road_type,
+                "max_speed": segment.max_speed,
+                "capacity": segment.capacity,
+                "current_vehicles": segment.current_vehicles,
+                "congestion_ratio": segment.current_vehicles / segment.capacity if segment.capacity > 0 else 0.0,
+                "weather_factor": segment.weather_factor,
+                "traffic_factor": segment.traffic_factor,
+                "toll": segment.toll,
+                "toll_cost": segment.toll_cost
+            }
+            road_info["speed_limit"] = segment.max_speed
+            road_info["weather_impact"] = segment.weather_factor
+        
+        return road_info
+    
+    def _get_nearby_traffic_lights(self, node: int, range_meters: float) -> List[Dict[str, Any]]:
+        """Obtiene información de semáforos cercanos"""
+        nearby_lights = []
+        
+        # Buscar semáforos en el nodo actual y nodos vecinos
+        nodes_to_check = [node] + list(self.street_graph.neighbors(node)) if node in self.street_graph.nodes else []
+        
+        for check_node in nodes_to_check:
+            if check_node in self.traffic_lights:
+                light = self.traffic_lights[check_node]
+                light_info = {
+                    "node_id": check_node,
+                    "state": light.state,
+                    "time_until_change": self._calculate_time_until_change(light),
+                    "cycle_time": light.cycle_time,
+                    "is_adaptive": light.is_adaptive
+                }
+                nearby_lights.append(light_info)
+        
+        return nearby_lights
+    
+    def _get_nearby_emergency_events(self, node: int, range_meters: float) -> List[Dict[str, Any]]:
+        """Obtiene eventos de emergencia cercanos"""
+        nearby_events = []
+        
+        for event in self.active_events:
+            if not event.is_active:
+                continue
+            
+            # Verificar si el evento afecta nodos cercanos
+            event_info = {
+                "event_id": event.event_id,
+                "event_type": event.event_type.value,
+                "severity": event.severity,
+                "impact_factor": event.impact_factor,
+                "estimated_duration": event.estimated_duration.total_seconds(),
+                "description": event.description
+            }
+            nearby_events.append(event_info)
+        
+        return nearby_events
+    
+    def _get_delivery_opportunities(self, agent_id: str) -> Dict[str, Any]:
+        """Obtiene oportunidades de entrega para el agente"""
+        if agent_id not in self.bdi_delivery_trucks:
+            return {"error": "Agent not found"}
+        
+        agent = self.bdi_delivery_trucks[agent_id]
+        
+        opportunities = {
+            "pending_deliveries": len(agent.delivery_locations) - len(agent.completed_deliveries),
+            "next_delivery_location": None,
+            "estimated_delivery_time": 0.0,
+            "potential_collaborations": []
+        }
+        
+        # Identificar próxima entrega
+        remaining_deliveries = [loc for loc in agent.delivery_locations if loc not in agent.completed_deliveries]
+        if remaining_deliveries and agent.route:
+            for delivery_loc in remaining_deliveries:
+                if delivery_loc in agent.route:
+                    opportunities["next_delivery_location"] = delivery_loc
+                    break
+        
+        # Buscar oportunidades de colaboración
+        for other_id, other_agent in self.bdi_delivery_trucks.items():
+            if other_id == agent_id:
+                continue
+            
+            # Verificar si hay entregas cercanas que podrían coordinarse
+            common_areas = set(agent.delivery_locations) & set(other_agent.delivery_locations)
+            if common_areas:
+                collaboration = {
+                    "agent_id": other_id,
+                    "common_delivery_areas": list(common_areas),
+                    "potential_savings": len(common_areas) * 0.1  # Estimación simple
+                }
+                opportunities["potential_collaborations"].append(collaboration)
+        
+        return opportunities
+    
+    def _get_nearby_fuel_stations(self, node: int, range_meters: float) -> List[Dict[str, Any]]:
+        """Obtiene estaciones de combustible cercanas (simuladas)"""
+        # En una implementación real, esto consultaría una base de datos de estaciones
+        fuel_stations = []
+        
+        # Simular algunas estaciones de combustible
+        if node % 10 == 0:  # Cada 10 nodos aproximadamente
+            station_info = {
+                "station_id": f"fuel_station_{node}",
+                "node_id": node,
+                "fuel_types": ["diesel", "gasoline"],
+                "price_per_liter": 1.2 + random.uniform(-0.2, 0.2),
+                "availability": True,
+                "wait_time_minutes": random.randint(2, 8)
+            }
+            fuel_stations.append(station_info)
+        
+        return fuel_stations
+    
+    def _get_congestion_forecast(self, node: int) -> Dict[str, Any]:
+        """Obtiene pronóstico de congestión"""
+        # Simulación simple de pronóstico
+        current_hour = self.current_time.hour
+        
+        # Patrones típicos de tráfico
+        rush_hour_morning = 7 <= current_hour <= 9
+        rush_hour_evening = 17 <= current_hour <= 19
+        
+        forecast = {
+            "next_hour_congestion": 0.3,
+            "peak_hour_expected": False,
+            "recommended_routes": [],
+            "traffic_trend": "stable"
+        }
+        
+        if rush_hour_morning or rush_hour_evening:
+            forecast["next_hour_congestion"] = 0.7
+            forecast["peak_hour_expected"] = True
+            forecast["traffic_trend"] = "increasing"
+        elif 22 <= current_hour or current_hour <= 6:
+            forecast["next_hour_congestion"] = 0.1
+            forecast["traffic_trend"] = "decreasing"
+        
+        return forecast
+    
+    def _calculate_time_until_change(self, traffic_light: TrafficLight) -> float:
+        """Calcula tiempo hasta el próximo cambio de semáforo"""
+        time_since_change = (self.current_time - traffic_light.last_change).total_seconds()
+        
+        if traffic_light.state == "green":
+            return max(0, traffic_light.green_duration - time_since_change)
+        elif traffic_light.state == "yellow":
+            return max(0, traffic_light.yellow_duration - time_since_change)
+        else:  # red
+            return max(0, traffic_light.red_duration - time_since_change)
+    
+    def _calculate_node_distance(self, node1: int, node2: int) -> float:
+        """Calcula distancia aproximada entre dos nodos"""
+        if node1 not in self.street_graph.nodes or node2 not in self.street_graph.nodes:
+            return float('inf')
+        
+        try:
+            path_length = nx.shortest_path_length(self.street_graph, node1, node2, weight='weight')
+            return path_length
+        except nx.NetworkXNoPath:
+            return float('inf')

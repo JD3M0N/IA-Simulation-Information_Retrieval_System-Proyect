@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
-from src.multiagent.Civilian_enums import *
+from .Civilian_enums import *
 
 # Importar clases base del sistema multi-agente - SIMPLIFIED
 # Communication manager disabled for standalone operation
@@ -24,7 +24,7 @@ from enum import Enum
 # Importar environment para interactuar con el estado del entorno
 sys.path.append("src/multiagent")
 # from environment import WeatherCondition, RoadCondition
-from src.multiagent.Environment_enums import *
+from Environment_enums import *
 
 class CivilianTrafficAgent:
     """
