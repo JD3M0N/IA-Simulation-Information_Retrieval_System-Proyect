@@ -167,8 +167,8 @@ async def send_positions(websocket):
     while True:
         try:
             # Actualizar las posiciones
-            #update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes, street_congestion)
-            #update_traffic_lights(traffic_lights)
+            update_vehicle_positions(street_graph, traffic_lights, vehicles, vehicle_speeds, all_nodes, street_congestion)
+            update_traffic_lights(traffic_lights)
             
             # Empaquetar y enviar los datos
             payload = {
@@ -401,6 +401,8 @@ class CVRPHandler(BaseHTTPRequestHandler):
 async def main():
     # Cargar calles, inicializar vehículos y semaforos
     load_streets()
+    initialize_vehicles(street_graph, all_nodes, vehicle_speeds, vehicles, street_congestion)
+    initialize_traffic_lights(street_graph, traffic_lights)
 
     print("Servidor WebSocket iniciando en puerto 8765...")
     
