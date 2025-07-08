@@ -14,6 +14,7 @@ from pathlib import Path
 from .civilian_traffic import CivilianTrafficAgent
 from .Civilian_enums import *
 from .Environment_enums import *
+from climate_fuzzy import analizar_clima
 
 # Imports
 sys.path.append("src")
@@ -152,6 +153,17 @@ class Environment:
         # Estado del clima
         self.weather_state = WeatherState()
         self.weather_forecast = []  # Pronóstico futuro
+        self.state: Dict[str, Any] = {
+            "time":        self.current_time,
+            "weather": {
+                "temperature":   None,  # °C
+                "humidity":      None,  # %
+                "wind_speed":    None,  # km/h
+                "precipitation": None,  # mm/h
+                "condition":     None,  # string, p. ej. "nublado"
+                "risk_index":    None,  # 0–10, resultado fuzzy
+            },
+        }    
         
         # Vehículos en el sistema
         self.vehicles: Dict[str, CivilianTrafficAgent] = {}
@@ -229,6 +241,26 @@ class Environment:
         if COMMUNICATION_AVAILABLE:
             self.communication_task = None
     
+
+    def step(self):
+        # 1) Calculas o actualizas temperatura, humedad, viento y lluvia
+        temp   = self._calc_temperature()
+        hum    = self._calc_humidity()
+        wind   = self._calc_wind_speed()
+        rain   = self._calc_precipitation()
+
+        # 2) Analiza clima con lógica difusa
+        risk_index = analizar_clima(temp, hum, wind, rain)
+
+        # 3) Guarda todo en el estado
+        self.state["weather"] = {
+            "temperature": temp,
+            "humidity":    hum,
+            "wind_speed":  wind,
+            "precipitation": rain,
+            "risk_index":  risk_index,
+        }
+
     def _initialize_environment(self):
         # Inicializar segmentos de carretera
         self._initialize_road_segments()
@@ -495,16 +527,26 @@ class Environment:
         
         return False
     
-    def update_weather(self, new_weather: Optional[WeatherState] = None):
-        """Actualiza el estado del clima"""
-        if new_weather:
-            self.weather_state = new_weather
-        else:
-            # Generación automática basada en patrones
-            self._generate_weather_evolution()
-        
-        # Aplicar impacto del clima a los segmentos
-        self._apply_weather_impact()
+    def _update_weather(self):
+        # 1) Calculas o actualizas tus atributos weather_state
+        new_temp = self.weather_state.temperature    # p. ej. 30.2
+        new_hum  = self.weather_state.humidity       # p. ej. 75.4
+        new_wind = self.weather_state.wind_speed     # p. ej. 12.0
+        new_rain = self.weather_state.precipitation  # p. ej. 0.0
+        new_cond = self.weather_state.condition.value  # p. ej. "lluvia_ligera"
+
+        # 2) Calcula el índice difuso
+        risk = analizar_clima(new_temp, new_hum, new_wind, new_rain)
+
+        # 3) Actualiza el dict que ven los agentes
+        self.state["weather"].update({
+            "temperature":   new_temp,
+            "humidity":      new_hum,
+            "wind_speed":    new_wind,
+            "precipitation": new_rain,
+            "condition":     new_cond,
+            "risk_index":    risk,
+        })
     
     def _generate_weather_evolution(self):
         """Genera evolución natural del clima"""

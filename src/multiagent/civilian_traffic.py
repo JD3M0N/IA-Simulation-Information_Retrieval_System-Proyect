@@ -322,11 +322,12 @@ class CivilianTrafficAgent:
             # Obtener estado del clima
             weather_info = environment_state.get("weather", {})
             if weather_info:
-                condition = weather_info.get("condition", "despejado")
-                perception["weather_condition"] = condition
-                perception["visibility"] = weather_info.get("visibility", 10.0)
-                perception["precipitation"] = weather_info.get("precipitation", 0.0)
-                perception["wind_speed"] = weather_info.get("wind_speed", 0.0)
+                perception["weather_condition"]    = weather_info.get("condition", "despejado")
+                perception["visibility"]           = weather_info.get("visibility", 10.0)
+                perception["precipitation"]        = weather_info.get("precipitation", 0.0)
+                perception["wind_speed"]           = weather_info.get("wind_speed", 0.0)
+                perception["weather_risk_index"] = weather_info.get("risk_index", 0.0)
+                print(f"[DEBUG-Agent] Percibido risk_index: {perception['weather_risk_index']:.2f}")
                 
                 # Actualizar percepción climática interna
                 self._update_weather_perception(weather_info)
@@ -571,14 +572,15 @@ class CivilianTrafficAgent:
         """Decide la velocidad objetivo basada en las condiciones"""
         target_speed = self.base_speed
         
-        # Ajustar por condiciones climáticas
-        weather_condition = perception.get("weather_condition", "despejado")
-        if weather_condition in ["lluvia_ligera", "nublado"]:
-            target_speed *= 0.9
-        elif weather_condition in ["lluvia_fuerte", "niebla"]:
-            target_speed *= 0.7
-        elif weather_condition == "tormenta":
-            target_speed *= 0.5
+        # Ajuste por índice de riesgo fuzzy
+        risk = perception.get("weather_risk_index", 0.0)
+        print(f"[DEBUG-Agent] Riesgo climático: {risk:.2f}/10")
+
+        # Factor lineal: riesgo 0 → factor=1.0 ; riesgo 10 → factor=0.5
+        factor = 1.0 - 0.5 * (risk / 10.0)
+        print(f"[DEBUG-Agent] Factor de reducción de velocidad: {factor:.2f}")
+
+        target_speed *= factor
         
         # Ajustar por congestión
         congestion_level = perception.get("congestion_level", 0.0)
