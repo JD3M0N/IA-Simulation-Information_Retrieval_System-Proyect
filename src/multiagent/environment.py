@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import random
+import asyncio
 import numpy as np
 import networkx as nx
 from typing import Dict, List, Any, Tuple, Optional, Union
@@ -291,7 +292,42 @@ class Environment:
             node_data = self.street_graph.nodes[start_node]
             behavior = random.choice([b for b in CivilianBehavior])
             v = CivilianTrafficAgent(vehicle_id=vehicle_id, initial_position=[node_data["lat"], node_data["lon"]], initial_node=start_node, behavior=behavior)
+            
+            # Seleccionar destino aleatorio diferente al nodo inicial
+            target_node = random.choice([n for n in all_nodes if n != start_node])
+            
+            # Calcular ruta usando Dijkstra
+            try:
+                # NetworkX ya implementa Dijkstra con shortest_path
+                route = nx.shortest_path(self.street_graph, source=start_node, target=target_node, weight='weight')
+                
+                # Asignar ruta y destino al vehículo
+                destination_types = ["work", "home", "shopping", "recreation", "service"]
+                destination_type = random.choice(destination_types)
+                v.assign_route_and_destination(route, target_node, destination_type)
+            
+            except nx.NetworkXNoPath:
+                # Si no hay ruta posible, asignar un destino cercano
+                try:
+                    # Buscar nodos vecinos del start_node
+                    neighbors = list(self.street_graph.neighbors(start_node))
+                    if neighbors:
+                        target_node = random.choice(neighbors)
+                        route = [start_node, target_node]
+                        v.assign_route_and_destination(route, target_node, "local")
+                    else:
+                        # Si no hay vecinos, crear ruta mínima
+                        route = [start_node]
+                        v.assign_route_and_destination(route, start_node, "idle")
+                except Exception as e:
+                    print(f"Error asignando ruta alternativa para {vehicle_id}: {e}")
+                    route = [start_node]
+                    v.assign_route_and_destination(route, start_node, "idle")
+            # print("la ruta: ")
+            # print(route)
+            
             self.vehicles[vehicle_id] = v
+            
 
     def _initialize_weather(self):
         # Configurar estado inicial basado en estación y ubicación
@@ -627,13 +663,13 @@ class Environment:
         # Implementación básica - en práctica sería más compleja
         return False
     
-    def step(self):
+    async def step(self):
         """Avanza la simulación un paso"""
         # Actualizar tiempo
         self.current_time += timedelta(seconds=self.time_step)
         
         # Actualizar componentes del entorno
-        self._update_vehicle_positions()
+        await self._update_vehicle_positions()
         self.update_traffic_lights()
         self.update_congestion()
         
@@ -652,10 +688,10 @@ class Environment:
         # Limpiar eventos expirados
         self._cleanup_expired_events()
     
-    def _update_vehicle_positions(self):
+    async def _update_vehicle_positions(self):
         """Actualiza posiciones de todos los vehículos"""
         for vehicle in self.vehicles.values():
-            vehicle.next_step(self.get_environment_state())
+            await vehicle.next_step(self.get_environment_state())
     
     def _move_vehicle_to_next_node(self, vehicle: VehicleState):
         """Mueve un vehículo al siguiente nodo"""

@@ -771,7 +771,7 @@ class CivilianTrafficAgent(BaseAgent):
             return
         
         # Calcular progreso en la arista actual
-        movement_factor = self.current_speed * 0.0001  # Factor de conversión
+        movement_factor = self.current_speed * 0.01  # Factor de conversión
         self.progress += movement_factor
         
         # Verificar si llegó al siguiente nodo
@@ -955,11 +955,13 @@ class CivilianTrafficAgent(BaseAgent):
             if light_id in self.visible_traffic_lights:
                 self.visible_traffic_lights[light_id]["state"] = new_state
     
-    def next_step(self, environment_state: Dict[str, Any]):
-        perception = self.perceive(environment_state)
-        decision = self.decide(perception)
-        if self.act(decision):
+    async def next_step(self, environment_state: Dict[str, Any]):
+        perception = await self.perceive(environment_state)
+        decision = await self.decide(perception)
+        if await self.act(decision):
             print(f"pincho la action !!! YEYYYY!!! del vehiculo {self.agent_id}")
+            if(self.agent_id == 'vehicle0'):
+                print(self)
         else:
             print(f"No pincho T_T :/ {self.agent_id}")
   
@@ -969,4 +971,6 @@ class CivilianTrafficAgent(BaseAgent):
     def __str__(self) -> str:
         return (f"CivilianTrafficAgent(id={self.agent_id}, "
                 f"type={self.vehicle_type}, behavior={self.behavior.value}, "
-                f"state={self.movement_state.value}, speed={self.current_speed:.1f})")
+                f"state={self.movement_state.value}, speed={self.current_speed:.1f}), "
+                f"current_node={self.current_node}, "
+                f"next_node={self.next_node}, ")

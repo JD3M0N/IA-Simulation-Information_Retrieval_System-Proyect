@@ -1,5 +1,8 @@
 # Métodos adicionales para RouteOptimizerAgent
 
+from datetime import datetime
+
+
 async def optimize_route(self, request):
     """Optimiza una ruta según los parámetros especificados"""
     try:

@@ -3,9 +3,15 @@ import websockets
 import json
 import random
 import os
+import sys
 import networkx as nx
 from datetime import datetime
 import math
+import threading
+from flask import Flask, request, jsonify
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Imports específicos del proyecto
 from src.multi_agent.simulation_environment import SimulationEnvironment
 from src.multiagent.environment import Environment
 from src.vehicle import initialize_vehicles, update_vehicle_positions
@@ -13,9 +19,6 @@ from src.traffic_lights import initialize_traffic_lights, update_traffic_lights
 from src.optimized_route import optimize_delivery_routes
 from src.NLP.cvrp_assistant import analyze_cvrp_requirements
 from src.NLP.RAG import create_vrp_rag_assistant
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-from flask import Flask, request, jsonify
 
 # Importar sistema multi-agente
 from src.multi_agent import (
@@ -731,9 +734,9 @@ async def main():
     print("Entorno de simulación creado")
     print("==========================================================")
     
-    for i in range(5):
+    for i in range(10):
         print(f"epoca{i}^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-        sim.step()
+        await sim.step()
     
     
     
