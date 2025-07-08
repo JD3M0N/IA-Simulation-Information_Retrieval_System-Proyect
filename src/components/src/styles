@@ -1,0 +1,6 @@
+src/
+└── traffic_lights/
+    ├── TrafficLightVisualizer.jsx
+    ├── TrafficLightController.jsx
+    ├── trafficLightService.js
+    └── trafficLightStyles.css

@@ -1,0 +1,227 @@
+/* Estilos para el tooltip de semáforos */
+.traffic-light-tooltip {
+  position: fixed;
+  z-index: 1000;
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  font-family: 'Arial', sans-serif;
+  font-size: 13px;
+  max-width: 300px;
+  min-width: 250px;
+  pointer-events: none;
+  user-select: none;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Encabezado del tooltip */
+.tooltip-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.state-icon {
+  font-size: 24px;
+  margin-right: 10px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+.header-info {
+  flex: 1;
+}
+
+.light-id {
+  font-weight: bold;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.state-text {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Secciones del tooltip */
+.tooltip-section {
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-weight: bold;
+  font-size: 12px;
+  color: #444;
+  margin-bottom: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* Filas de información */
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  padding: 2px 0;
+}
+
+.info-row .label {
+  font-weight: 500;
+  color: #555;
+  font-size: 12px;
+}
+
+.info-row .value {
+  font-weight: normal;
+  color: #333;
+  font-size: 12px;
+  text-align: right;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Estilos especiales para valores */
+.value.active {
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+.value.emergency {
+  color: #F44336;
+  font-weight: bold;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.value.warning {
+  color: #FF9800;
+  font-weight: bold;
+}
+
+.value.good {
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+.value.technical {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #666;
+}
+
+/* Filas especiales */
+.info-row.special {
+  background-color: rgba(76, 175, 80, 0.1);
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin: 2px 0;
+}
+
+.info-row.special.emergency {
+  background-color: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.2);
+}
+
+/* Barra de progreso */
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0;
+}
+
+.progress-fill {
+  height: 100%;
+  transition: width 0.3s ease-in-out;
+  border-radius: 4px;
+}
+
+.progress-text {
+  text-align: center;
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* Pie del tooltip */
+.tooltip-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  text-align: center;
+}
+
+.tooltip-footer small {
+  color: #888;
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Variantes de color basadas en estado */
+.traffic-light-tooltip[style*="background-color: rgb(232, 245, 232)"] {
+  border-color: #4CAF50;
+}
+
+.traffic-light-tooltip[style*="background-color: rgb(255, 249, 230)"] {
+  border-color: #FF9800;
+}
+
+.traffic-light-tooltip[style*="background-color: rgb(255, 230, 230)"] {
+  border-color: #F44336;
+}
+
+.traffic-light-tooltip[style*="background-color: rgb(240, 240, 240)"] {
+  border-color: #999;
+}
+
+/* Responsividad */
+@media (max-width: 768px) {
+  .traffic-light-tooltip {
+    max-width: 280px;
+    min-width: 220px;
+    font-size: 12px;
+  }
+  
+  .state-icon {
+    font-size: 20px;
+  }
+  
+  .light-id {
+    font-size: 13px;
+  }
+}
+
+/* Efectos de hover (aunque el tooltip no sea interactivo) */
+.traffic-light-tooltip:hover {
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.2);
+}

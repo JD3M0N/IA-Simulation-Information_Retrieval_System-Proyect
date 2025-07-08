@@ -1,0 +1,6 @@
+src/
+└── traffic_lights/
+    ├── __init__.py
+    ├── traffic_light_view.jsx  # Componente de visualización
+    ├── traffic_light_service.js # Servicio para interactuar con el backend
+    └── traffic_light_styles.css  # Estilos específicos
