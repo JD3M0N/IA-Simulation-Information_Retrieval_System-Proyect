@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from src.multiagent.civilian_traffic import CivilianTrafficAgent
+from src.multiagent.Civilian_enums import *
+from src.multiagent.Environment_enums import *
+
 # Imports
 sys.path.append("src")
 sys.path.append("src/weather")
@@ -25,37 +29,6 @@ except ImportError as e:
     print(f"Advertencia: Módulos de clima/tráfico no disponibles: {e}")
     WEATHER_AVAILABLE = False
 
-
-class WeatherCondition(Enum):
-    """Condiciones climáticas posibles"""
-    CLEAR = "despejado"
-    CLOUDY = "nublado"
-    LIGHT_RAIN = "lluvia_ligera"
-    HEAVY_RAIN = "lluvia_fuerte"
-    STORM = "tormenta"
-    FOG = "niebla"
-    EXTREME_HEAT = "calor_extremo"
-
-
-class RoadCondition(Enum):
-    """Condiciones de las vías"""
-    EXCELLENT = "excelente"
-    GOOD = "buena"
-    REGULAR = "regular"
-    BAD = "mala"
-    CLOSED = "cerrada"
-
-
-class TrafficEventType(Enum):
-    """Tipos de eventos de tráfico"""
-    ACCIDENT = "accidente"
-    CONSTRUCTION = "construccion"
-    PROTEST = "protesta"
-    SPECIAL_EVENT = "evento_especial"
-    VEHICLE_BREAKDOWN = "averia_vehiculo"
-    EMERGENCY = "emergencia"
-    ROAD_CLOSURE = "cierre_vial"
-    FLOODING = "inundacion"
 
 
 @dataclass
@@ -166,7 +139,7 @@ class Environment:
         self.weather_forecast = []  # Pronóstico futuro
         
         # Vehículos en el sistema
-        self.vehicles: Dict[str, VehicleState] = {}
+        self.vehicles: Dict[str, CivilianTrafficAgent] = {}
         self.delivery_trucks: Dict[str, VehicleState] = {}
         self.civilian_traffic: Dict[str, VehicleState] = {}
         
@@ -313,25 +286,13 @@ class Environment:
         all_nodes = list(self.street_graph.nodes())
         
         for i in range(num_vehicles):
-            vehicle_id = f"civilian_{i}"
+            vehicle_id = "vehicle"+ str(i)
             start_node = random.choice(all_nodes)
             node_data = self.street_graph.nodes[start_node]
-            
-            vehicle = VehicleState(
-                vehicle_id=vehicle_id,
-                vehicle_type=random.choice(["car", "motorcycle", "van"]),
-                current_node=start_node,
-                lat=node_data.get('lat', 0.0),
-                lon=node_data.get('lon', 0.0),
-                speed=random.uniform(30, 60),
-                capacity=random.randint(400, 1000),
-                fuel_level=random.uniform(20, 100),
-                driver_type=random.choice(["normal", "aggressive", "cautious"])
-            )
-            
-            self.vehicles[vehicle_id] = vehicle
-            self.civilian_traffic[vehicle_id] = vehicle
-    
+            behavior = random.choice([b for b in CivilianBehavior])
+            v = CivilianTrafficAgent(vehicle_id=vehicle_id, initial_position=[node_data["lat"], node_data["lon"]], initial_node=start_node, behavior=behavior)
+            self.vehicles[vehicle_id] = v
+
     def _initialize_weather(self):
         # Configurar estado inicial basado en estación y ubicación
         current_month = self.current_time.month
@@ -383,6 +344,7 @@ class Environment:
                 lat=node_data.get('lat', 0.0),
                 lon=node_data.get('lon', 0.0),
                 capacity=capacity,
+                # current_speed=kwargs.get('speed, 45.0),
                 speed=kwargs.get('speed', 45.0),
                 fuel_level=kwargs.get('fuel_level', 100.0),
                 driver_type=kwargs.get('driver_type', 'normal'),
@@ -568,19 +530,31 @@ class Environment:
                 "visibility": self.weather_state.visibility
             },
             
-            # Vehículos
+            # Vehículos civiles
             "vehicles": {vid: {
                 "type": v.vehicle_type,
                 "lat": v.lat,
                 "lon": v.lon,
-                "speed": v.speed,
+                "speed": v.current_speed,
                 "current_node": v.current_node,
                 "next_node": v.next_node,
                 "progress": v.progress,
                 "fuel_level": v.fuel_level,
                 "current_load": v.current_load,
-                "is_active": v.is_active,
-                "emergency_priority": v.emergency_priority
+                "capacity": v.capacity,
+                "behavior": v.behavior.value,
+                "movement_state": v.movement_state.value,
+                "target_node": v.target_node,
+                "route": v.route,
+                "has_destination": v.has_destination,
+                "destination_type": v.destination_type,
+                "cooperation_level": v.cooperation_level,
+                "risk_tolerance": v.risk_tolerance,
+                "patience_level": v.patience_level,
+                "emergency_priority": getattr(v, 'emergency_priority', False),
+                "distance_traveled": v.distance_traveled,
+                "emergency_responses": v.emergency_responses,
+                "traffic_violations": v.traffic_violations
             } for vid, v in self.vehicles.items()},
             
             # Camiones de reparto específicamente
@@ -681,23 +655,7 @@ class Environment:
     def _update_vehicle_positions(self):
         """Actualiza posiciones de todos los vehículos"""
         for vehicle in self.vehicles.values():
-            if not vehicle.is_active:
-                continue
-                
-            # Lógica de movimiento simplificada
-            if vehicle.next_node is not None:
-                # Calcular velocidad efectiva
-                edge_id = (vehicle.current_node, vehicle.next_node)
-                congestion_factor = self.congestion_matrix.get(edge_id, 1.0)
-                
-                effective_speed = vehicle.speed / congestion_factor
-                
-                # Actualizar progreso
-                vehicle.progress += effective_speed * self.time_step * 0.0001
-                
-                # Verificar si llegó al siguiente nodo
-                if vehicle.progress >= 1.0:
-                    self._move_vehicle_to_next_node(vehicle)
+            vehicle.next_step(self.get_environment_state())
     
     def _move_vehicle_to_next_node(self, vehicle: VehicleState):
         """Mueve un vehículo al siguiente nodo"""
@@ -764,7 +722,7 @@ class Environment:
     def _update_system_metrics(self):
         """Actualiza las métricas del sistema"""
         # Contar vehículos activos
-        active_vehicles = sum(1 for v in self.vehicles.values() if v.is_active)
+        active_vehicles = sum(1 for v in self.vehicles.values())
         self.system_metrics["total_vehicles"] = active_vehicles
         
         # Contar entregas activas
@@ -774,7 +732,7 @@ class Environment:
         
         # Calcular velocidad promedio
         if active_vehicles > 0:
-            total_speed = sum(v.speed for v in self.vehicles.values() if v.is_active)
+            total_speed = sum(v.current_speed for v in self.vehicles.values())
             self.system_metrics["average_speed"] = total_speed / active_vehicles
         
         # Calcular nivel de congestión promedio

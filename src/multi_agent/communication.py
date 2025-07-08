@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta
 import json
 
-from .base_agent import BaseAgent, Message, MessageType, AgentState
+from src.multi_agent.base_agent import BaseAgent, Message, MessageType, AgentState
 
 class EventBus:
     """

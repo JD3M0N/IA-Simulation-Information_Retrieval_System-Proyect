@@ -730,6 +730,16 @@ async def main():
     print(sim)
     print("Entorno de simulación creado")
     print("==========================================================")
+    
+    for i in range(5):
+        print(f"epoca{i}^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+        sim.step()
+    
+    
+    
+    
+    
+    
     print("Servidor WebSocket iniciando en puerto 8765...")
     
     # Iniciar servidor HTTP para la IA en un hilo separado
