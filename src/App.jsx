@@ -113,7 +113,7 @@ function App() {
     const connectWebSocket = () => {
       try {
         console.log("Intentando conectar al WebSocket...");
-        const ws = new WebSocket("ws://localhost:8765");
+        const ws = new WebSocket("ws://localhost:8766");
         wsRef.current = ws;
 
         ws.onopen = () => {

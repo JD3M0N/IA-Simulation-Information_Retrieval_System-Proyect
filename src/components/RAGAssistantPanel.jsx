@@ -85,16 +85,21 @@ const RAGAssistantPanel = ({
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
-      
-      if (result.success) {
-        const newConversation = {
-          question: question,
-          response: result.response,
-          metrics: result.relevant_metrics,
-          timestamp: new Date().toLocaleTimeString(),
-          category: result.question_category
-        };
+      const result = await response.json();              if (result.success) {
+                const newConversation = {
+                  question: question,
+                  response: result.response,
+                  metrics: result.relevant_metrics,
+                  timestamp: new Date().toLocaleTimeString(),
+                  category: result.question_category,
+                  contextInfo: {
+                    retrievedDocs: result.context_used?.retrieved_documents || 0,
+                    vectorDbUsed: result.context_used?.vector_db_available || false,
+                    lsiSystemUsed: result.context_used?.lsi_system_available || false,
+                    sourcesUsed: result.context_used?.sources_used || [],
+                    collectionsSearched: result.context_used?.collections_searched || []
+                  }
+                };
 
         setConversationHistory(prev => [...prev, newConversation]);
         setResponse(result.response);
@@ -249,22 +254,54 @@ const RAGAssistantPanel = ({
                 lineHeight: '1.6'
               }}
             >
-              {conversationHistory.length === 0 && !response ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  color: '#9ca3af', 
-                  fontSize: '13px',
-                  marginTop: '40px' 
-                }}>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>🤖</div>
-                  <h4 style={{ margin: '0 0 8px 0', color: '#6b7280' }}>
-                    Asistente VRP con RAG
-                  </h4>
-                  <p style={{ margin: 0, lineHeight: '1.4' }}>
-                    Pregúntame sobre rutas, clima, tráfico, optimización o rendimiento del sistema.
-                    Uso toda la información contextual disponible para darte respuestas precisas.
-                  </p>
-                </div>
+              {conversationHistory.length === 0 && !response ? (                  <div style={{ 
+                    textAlign: 'center', 
+                    color: '#9ca3af', 
+                    fontSize: '13px',
+                    marginTop: '40px' 
+                  }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px' }}>🤖</div>
+                    <h4 style={{ margin: '0 0 8px 0', color: '#6b7280' }}>
+                      Asistente VRP con RAG Avanzado
+                    </h4>
+                    <p style={{ margin: '0 0 12px 0', lineHeight: '1.4' }}>
+                      Sistema híbrido con base de datos vectorial ChromaDB y análisis semántico LSI.
+                      Pregúntame sobre rutas, clima, tráfico, optimización o rendimiento del sistema.
+                    </p>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      gap: '8px', 
+                      fontSize: '11px',
+                      marginTop: '8px',
+                      flexWrap: 'wrap'
+                    }}>
+                      <span style={{ 
+                        background: '#e5f3ff', 
+                        color: '#0066cc', 
+                        padding: '2px 6px', 
+                        borderRadius: '10px' 
+                      }}>
+                        🔍 Búsqueda Vectorial
+                      </span>
+                      <span style={{ 
+                        background: '#f0f9ff', 
+                        color: '#0369a1', 
+                        padding: '2px 6px', 
+                        borderRadius: '10px' 
+                      }}>
+                        🧠 Análisis LSI
+                      </span>
+                      <span style={{ 
+                        background: '#ecfdf5', 
+                        color: '#059669', 
+                        padding: '2px 6px', 
+                        borderRadius: '10px' 
+                      }}>
+                        📚 Contexto Dinámico
+                      </span>
+                    </div>
+                  </div>
               ) : (
                 <>
                   {/* Historial de conversación */}
@@ -281,10 +318,24 @@ const RAGAssistantPanel = ({
                         color: '#9ca3af',
                         marginTop: '6px',
                         display: 'flex',
-                        justifyContent: 'space-between'
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '4px'
                       }}>
                         <span>{conv.timestamp}</span>
                         <span>📊 {conv.category}</span>
+                        {conv.contextInfo && (
+                          <>
+                            <span>📚 {conv.contextInfo.retrievedDocs} docs</span>
+                            {conv.contextInfo.vectorDbUsed && <span>🔍 VectorDB</span>}
+                            {conv.contextInfo.lsiSystemUsed && <span>🧠 LSI</span>}
+                            {conv.contextInfo.collectionsSearched.length > 0 && (
+                              <span title={`Colecciones: ${conv.contextInfo.collectionsSearched.join(', ')}`}>
+                                🗂️ {conv.contextInfo.collectionsSearched.length}
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}

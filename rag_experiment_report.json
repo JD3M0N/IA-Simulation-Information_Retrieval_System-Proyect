@@ -1,0 +1,421 @@
+{
+  "retroalimentacion": {
+    "learning_progression": [
+      {
+        "iteration": 1,
+        "docs_before": 7,
+        "docs_after": 7,
+        "improvement": 0,
+        "collections_used": 2,
+        "response_length": 5146,
+        "context_quality": 0.7766666666666666
+      },
+      {
+        "iteration": 2,
+        "docs_before": 7,
+        "docs_after": 7,
+        "improvement": 0,
+        "collections_used": 2,
+        "response_length": 3469,
+        "context_quality": 0.7766666666666666
+      },
+      {
+        "iteration": 3,
+        "docs_before": 7,
+        "docs_after": 7,
+        "improvement": 0,
+        "collections_used": 2,
+        "response_length": 4377,
+        "context_quality": 0.7766666666666666
+      },
+      {
+        "iteration": 4,
+        "docs_before": 7,
+        "docs_after": 7,
+        "improvement": 0,
+        "collections_used": 2,
+        "response_length": 5088,
+        "context_quality": 0.7766666666666666
+      },
+      {
+        "iteration": 5,
+        "docs_before": 7,
+        "docs_after": 7,
+        "improvement": 0,
+        "collections_used": 2,
+        "response_length": 4956,
+        "context_quality": 0.7766666666666666
+      }
+    ],
+    "knowledge_growth": [
+      {
+        "collection": "weather_data",
+        "document_count": 0
+      },
+      {
+        "collection": "route_analysis",
+        "document_count": 0
+      },
+      {
+        "collection": "traffic_events",
+        "document_count": 0
+      },
+      {
+        "collection": "system_performance",
+        "document_count": 0
+      },
+      {
+        "collection": "knowledge_base",
+        "document_count": 0
+      },
+      {
+        "collection": "historical_insights",
+        "document_count": 0
+      }
+    ],
+    "context_improvement": [],
+    "total_documents": 0,
+    "learning_effectiveness": 0.0
+  },
+  "busqueda_hibrida": {
+    "vector_only": [
+      {
+        "query": "optimización de rutas con algoritmos genéticos",
+        "results_count": 0,
+        "avg_similarity": 0,
+        "search_time": 0.1200418472290039,
+        "quality_score": 0.0
+      },
+      {
+        "query": "impacto del clima en la logística urbana",
+        "results_count": 0,
+        "avg_similarity": 0,
+        "search_time": 0.016999483108520508,
+        "quality_score": 0.0
+      },
+      {
+        "query": "gestión de tráfico en centro histórico",
+        "results_count": 0,
+        "avg_similarity": 0,
+        "search_time": 0.01899862289428711,
+        "quality_score": 0.0
+      },
+      {
+        "query": "eficiencia energética en vehículos de reparto",
+        "results_count": 0,
+        "avg_similarity": 0,
+        "search_time": 0.01899862289428711,
+        "quality_score": 0.0
+      }
+    ],
+    "lsi_only": [
+      {
+        "query": "optimización de rutas con algoritmos genéticos",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0
+      },
+      {
+        "query": "impacto del clima en la logística urbana",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0
+      },
+      {
+        "query": "gestión de tráfico en centro histórico",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0
+      },
+      {
+        "query": "eficiencia energética en vehículos de reparto",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0
+      }
+    ],
+    "hybrid": [
+      {
+        "query": "optimización de rutas con algoritmos genéticos",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0,
+        "sources_used": []
+      },
+      {
+        "query": "impacto del clima en la logística urbana",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0,
+        "sources_used": []
+      },
+      {
+        "query": "gestión de tráfico en centro histórico",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0,
+        "sources_used": []
+      },
+      {
+        "query": "eficiencia energética en vehículos de reparto",
+        "results_count": 0,
+        "avg_score": 0,
+        "search_time": 0.0,
+        "quality_score": 0.0,
+        "sources_used": []
+      }
+    ],
+    "comparison": {
+      "avg_vector_quality": 0.0,
+      "avg_lsi_quality": 0.0,
+      "avg_hybrid_quality": 0.0,
+      "avg_vector_time": 0.04375964403152466,
+      "avg_lsi_time": 0.0,
+      "avg_hybrid_time": 0.0
+    }
+  },
+  "actualizacion_tiempo_real": {
+    "update_timeline": [
+      {
+        "update_number": 1,
+        "data_type": "weather",
+        "update_latency": 0.03643631935119629,
+        "timestamp": "2025-07-13T20:34:43.380577"
+      },
+      {
+        "update_number": 2,
+        "data_type": "routes",
+        "update_latency": 0.044008731842041016,
+        "timestamp": "2025-07-13T20:34:48.878025"
+      },
+      {
+        "update_number": 3,
+        "data_type": "traffic_events",
+        "update_latency": 0.04478096961975098,
+        "timestamp": "2025-07-13T20:34:56.372632"
+      },
+      {
+        "update_number": 4,
+        "data_type": "performance",
+        "update_latency": 0.04264259338378906,
+        "timestamp": "2025-07-13T20:35:04.677741"
+      }
+    ],
+    "response_evolution": [
+      {
+        "stage": "inicial",
+        "docs_retrieved": 8,
+        "collections_used": [
+          "knowledge_base",
+          "system_performance",
+          "route_analysis"
+        ]
+      },
+      {
+        "stage": "después_update_1",
+        "docs_retrieved": 8,
+        "collections_used": [
+          "knowledge_base",
+          "system_performance",
+          "route_analysis"
+        ],
+        "response_change": 363
+      },
+      {
+        "stage": "después_update_2",
+        "docs_retrieved": 8,
+        "collections_used": [
+          "knowledge_base",
+          "system_performance",
+          "route_analysis"
+        ],
+        "response_change": -36
+      },
+      {
+        "stage": "después_update_3",
+        "docs_retrieved": 9,
+        "collections_used": [
+          "traffic_events",
+          "system_performance",
+          "route_analysis"
+        ],
+        "response_change": 459
+      },
+      {
+        "stage": "después_update_4",
+        "docs_retrieved": 9,
+        "collections_used": [
+          "traffic_events",
+          "system_performance",
+          "route_analysis"
+        ],
+        "response_change": 901
+      }
+    ],
+    "latency_analysis": {
+      "avg_latency": 0.041967153549194336,
+      "max_latency": 0.04478096961975098,
+      "min_latency": 0.03643631935119629,
+      "total_updates": 4
+    }
+  },
+  "persistencia": {
+    "pre_restart": {
+      "weather_data": 0,
+      "route_analysis": 0,
+      "traffic_events": 0,
+      "system_performance": 0,
+      "knowledge_base": 0,
+      "historical_insights": 0
+    },
+    "post_restart": {
+      "weather_data": 0,
+      "route_analysis": 0,
+      "traffic_events": 0,
+      "system_performance": 0,
+      "knowledge_base": 1,
+      "historical_insights": 0
+    },
+    "data_integrity": true,
+    "persistence_verified": true,
+    "test_document_found": true
+  },
+  "expansion_rocchio": {
+    "queries_tested": [
+      {
+        "original_query": "optimización rutas",
+        "original_results": 0,
+        "expanded_results": 0,
+        "original_quality": 0.0,
+        "expanded_quality": 0.0,
+        "improvement": 0.0,
+        "expansion_effective": false
+      },
+      {
+        "original_query": "clima lluvia",
+        "original_results": 0,
+        "expanded_results": 0,
+        "original_quality": 0.0,
+        "expanded_quality": 0.0,
+        "improvement": 0.0,
+        "expansion_effective": false
+      },
+      {
+        "original_query": "tráfico congestion",
+        "original_results": 0,
+        "expanded_results": 0,
+        "original_quality": 0.0,
+        "expanded_quality": 0.0,
+        "improvement": 0.0,
+        "expansion_effective": false
+      },
+      {
+        "original_query": "eficiencia energética",
+        "original_results": 0,
+        "expanded_results": 0,
+        "original_quality": 0.0,
+        "expanded_quality": 0.0,
+        "improvement": 0.0,
+        "expansion_effective": false
+      }
+    ],
+    "expansion_effectiveness": {
+      "avg_improvement": 0.0,
+      "effective_ratio": 0.0,
+      "total_queries": 4,
+      "effective_expansions": 0
+    }
+  },
+  "respuesta_aumentada": {
+    "response_analysis": [
+      {
+        "question": "¿Cómo optimizar rutas en La Habana?",
+        "complexity": "simple",
+        "context_sources": 0,
+        "response_length": 5522,
+        "docs_retrieved": 7,
+        "collections_used": 2,
+        "sources_used": [
+          "lsi",
+          "vector_db"
+        ],
+        "has_metrics": true,
+        "context_richness": 1.0
+      },
+      {
+        "question": "¿Cómo afecta la lluvia a mis rutas de entrega hoy?",
+        "complexity": "medium",
+        "context_sources": 1,
+        "response_length": 4833,
+        "docs_retrieved": 0,
+        "collections_used": 0,
+        "sources_used": [],
+        "has_metrics": true,
+        "context_richness": 0.0
+      },
+      {
+        "question": "Analiza la eficiencia de mis rutas considerando clima y tráfico actual",
+        "complexity": "complex",
+        "context_sources": 3,
+        "response_length": 4301,
+        "docs_retrieved": 0,
+        "collections_used": 0,
+        "sources_used": [],
+        "has_metrics": true,
+        "context_richness": 0.0
+      }
+    ],
+    "context_impact": {
+      "context_scaling": 0.0,
+      "avg_docs_retrieved": 2.3333333333333335,
+      "avg_collections_used": 0.6666666666666666,
+      "avg_response_length": 4885.333333333333,
+      "context_effectiveness": 0.3333333333333333
+    }
+  },
+  "rendimiento": {
+    "latency_analysis": {
+      "avg_latency": 6.424369192123413,
+      "min_latency": 5.584113836288452,
+      "max_latency": 7.647931098937988,
+      "cold_start_latency": 7.647931098937988,
+      "p95_latency": 7.456097269058227
+    },
+    "throughput_analysis": {
+      "concurrent_queries": 3,
+      "total_time": 20.523056268692017,
+      "queries_per_second": 0.14617705865653688,
+      "avg_response_quality": 0.5544444444444444
+    },
+    "resource_usage": {
+      "total_documents": 1,
+      "collections_count": 6,
+      "largest_collection": 1,
+      "collection_distribution": {
+        "weather_data": 0,
+        "route_analysis": 0,
+        "traffic_events": 0,
+        "system_performance": 0,
+        "knowledge_base": 1,
+        "historical_insights": 0
+      }
+    }
+  },
+  "summary": {
+    "experiment_date": "2025-07-13T20:36:27.971859",
+    "total_experiments": 7,
+    "overall_success": 0.26666666666666666,
+    "key_findings": [
+      "El sistema muestra 0.00% de efectividad en aprendizaje continuo",
+      "La persistencia de datos funciona correctamente al 100%",
+      "Latencia promedio de respuesta: 6.424s"
+    ]
+  }
+}

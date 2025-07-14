@@ -650,11 +650,11 @@ async def main():
     await asyncio.sleep(1)
     
     # Iniciar servidor WebSocket
-    print("✅ Servidor WebSocket iniciado correctamente en puerto 8765")
+    print("✅ Servidor WebSocket iniciado correctamente en puerto 8766")
     async with websockets.serve(
         handler, 
         "localhost", 
-        8765,
+        8766,
         ping_interval=30,
         ping_timeout=10
     ):
@@ -791,27 +791,65 @@ def ask_rag():
                 'message': 'Falta la pregunta'
             }), 400
         
-        # Extraer datos
-        question = data.get('question')
+        # Extraer datos de forma segura
+        question = data.get('question', '').strip()
+        if not question:
+            return jsonify({
+                'success': False,
+                'message': 'La pregunta no puede estar vacía'
+            }), 400
+        
         context_data = data.get('context_data', {})
         
-        # Actualizar la base de conocimientos con el contexto
-        if 'routes' in context_data:
-            RAG_ASSISTANT.update_knowledge_base("routes", {"routes": context_data['routes']})
-        
-        if 'weather' in context_data:
-            RAG_ASSISTANT.update_knowledge_base("weather", context_data['weather'])
+        # Actualizar la base de conocimientos con el contexto de forma segura
+        try:
+            if context_data and isinstance(context_data, dict):
+                # Procesar rutas
+                if 'routes' in context_data and context_data['routes'] is not None:
+                    routes_data = context_data['routes']
+                    if isinstance(routes_data, list) and len(routes_data) > 0:
+                        RAG_ASSISTANT.update_knowledge_base("routes", {"routes": routes_data})
+                
+                # Procesar clima
+                if 'weather' in context_data and context_data['weather'] is not None:
+                    weather_data = context_data['weather']
+                    if isinstance(weather_data, dict) and len(weather_data) > 0:
+                        RAG_ASSISTANT.update_knowledge_base("weather", weather_data)
+                
+                # Procesar estado del sistema
+                if 'system_status' in context_data and context_data['system_status'] is not None:
+                    system_data = context_data['system_status']
+                    if isinstance(system_data, dict):
+                        RAG_ASSISTANT.update_knowledge_base("performance", {
+                            "component": "system",
+                            "status": system_data.get("status", "unknown"),
+                            "description": "Estado actual del sistema"
+                        })
+        except Exception as update_error:
+            print(f"Error actualizando contexto: {update_error}")
+            # Continuar sin contexto actualizado
         
         # Obtener respuesta del asistente RAG
         result = RAG_ASSISTANT.ask_with_context(question)
+        
+        # Validar que el resultado sea válido
+        if not isinstance(result, dict):
+            return jsonify({
+                'success': False,
+                'message': 'Error en el formato de respuesta del asistente RAG'
+            }), 500
         
         return jsonify(result)
         
     except Exception as e:
         print(f"Error en consulta RAG: {e}")
+        import traceback
+        traceback.print_exc()
+        
         return jsonify({
             'success': False,
-            'message': f'Error interno: {str(e)}'
+            'message': f'Error interno del servidor: {str(e)}',
+            'error_type': type(e).__name__
         }), 500
 
 
